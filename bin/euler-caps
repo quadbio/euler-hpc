@@ -1,0 +1,35 @@
+#!/bin/bash
+# euler-caps: the per-user Slurm caps that apply to you right now, and what your jobs use against them.
+# Caps (QOS maxtrespu) change without notice, so read them here instead of copying them anywhere.
+#   On Euler:            euler-caps [--all] [account]
+#   From another host:   essh 'bash -s' < "$(command -v euler-caps)"   (add -- --all after -s for all partitions)
+# Default: GPU partitions (gpu, gpuhe, gpupr, cuda13pr) and normal; --all adds bigmem, hpc, ultramem.
+# Default account: every shareholder account you belong to (public excluded).
+set -u
+parts='gpu|gpuhe|gpupr|cuda13pr|normal'; [ "${1:-}" = "--all" ] && { parts='[a-z0-9]+'; shift; }
+accts=${1:-$(sacctmgr -nP show assoc user="$USER" format=account 2>/dev/null | grep -v -x public | sort -u)}
+[ -z "$accts" ] && { echo "euler-caps: no shareholder account found for $USER" >&2; exit 1; }
+echo "Per-user caps (running at once, shared by all your jobs and agents), $(date +%F):"
+printf '%-30s %-8s %6s %6s %9s\n' "QOS (account/partition/tier)" tier GPUs CPUs RAM
+for a in $accts; do
+  sacctmgr -nP show qos format=name,maxtrespu 2>/dev/null | grep -E "^$a/($parts)(/|\|)" | sort -t/ -k2,2 -k3,3n | while IFS='|' read -r name tres; do
+    [ -z "$tres" ] && continue
+    tier=${name##*/}; [ "$tier" = "${name#*/}" ] && tier="no tier"
+    case $tier in 4|24|120) tier="<= ${tier} h" ;; esac
+    g=$(echo "$tres" | grep -o 'gres/gpu=[0-9]*' | cut -d= -f2); c=$(echo "$tres" | grep -o 'cpu=[0-9]*' | cut -d= -f2)
+    m=$(echo "$tres" | grep -o 'mem=[0-9]*[KMGT]*' | cut -d= -f2)
+    printf '%-30s %-8s %6s %6s %9s\n' "$name" "$tier" "${g:--}" "${c:--}" "${m:--}"
+  done
+done
+echo
+echo "Your jobs now (account, state, partition: count, CPUs, GPUs):"
+# %b is a comma list such as gres/gpu:rtx_4090:4,gres/gpumem:24G: count only the gpu entry, never gpumem.
+squeue -u "$USER" -h -o '%a|%T|%P|%C|%b' 2>/dev/null | awk -F'|' '
+  { g = 0; ne = split($5, e, ",")
+    for (j = 1; j <= ne; j++) { x = e[j]; sub(/^gres[\/:]/, "", x)
+      if (x ~ /^gpu([:=]|$)/) { n = split(x, a, /[:=]/); g += (a[n] ~ /^[0-9]+$/) ? a[n] : 1 } }
+    k = $1" "$2" "$3; n_[k]++; c_[k] += $4; g_[k] += g; any = 1 }
+  END { if (!any) print "  none"; for (k in n_) printf "  %-40s %4d jobs %6d CPUs %4d GPUs\n", k, n_[k], c_[k], g_[k] }' | sort
+pend=$(squeue -u "$USER" -h -t PD -o '%r' 2>/dev/null | grep -c 'QOSMax')
+[ "$pend" -gt 0 ] && echo "  $pend pending job(s) are held by a per-user cap (QOSMax*): shrink requests or wait."
+exit 0

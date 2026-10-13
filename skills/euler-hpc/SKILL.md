@@ -5,8 +5,9 @@ description: >-
   allocations and the submit → monitor → logs loop, which session submitted which job, installing software and
   Python environments, containers, moving data in and out. Trigger on "run this on the cluster", "submit a job",
   "sbatch this", "run on a GPU", "run this for every sample", "hold a node", "is my job done?", "why did my job
-  fail?", "which session started this job?", "install X on Euler", "copy this to/from Euler". The rules for every
-  session (node, allocation, storage, snapshots, cancelling) come from this plugin's session-start context.
+  fail?", "which session started this job?", "install X on Euler", "copy this to/from Euler". From a laptop or
+  another server, use it together with the remote skill. The rules for every session (node,
+  allocation, storage, snapshots, cancelling) come from this plugin's session-start context.
 ---
 
 # Euler HPC
@@ -14,6 +15,9 @@ description: >-
 How to run work on Euler. The session-start context holds the rules for every session; if it is missing, read
 `${CLAUDE_PLUGIN_ROOT}/hooks/session_context.md`. Docs paths below are relative to https://docs.hpc.ethz.ch; read
 the page when you need more than the summary here.
+
+**Not on Euler?** If `hostname` doesn't start with `eu-`, load the `remote` skill first and send every command below
+through `essh`, never raw `ssh`.
 
 Work that doesn't fit this session's allocation takes one of three shapes: one **batch job**, a **job array** for
 many near-identical items, or an **interactive allocation** to iterate on a node. Each has a section below.
@@ -90,6 +94,8 @@ pixi run python scripts/run_me.py     # runs in the submit directory
   to the partition that has the model you asked for.
 - **Which queue is shorter:** `sbatch --test-only job.sh` estimates the start time without submitting; compare
   the default and fallback model.
+- **bf16 / flash-attention** need Ampere or newer (`rtx_3090`, `rtx_4090`, A100); the Turing cards (TITAN RTX,
+  Quadro RTX 6000, RTX 2080 Ti) don't. Billing follows requested RAM, not the GPU model: `references/cost.md`.
 - **Account:** omit `--account`; Slurm uses your default share. If `my_share_info` lists several, ask the user
   which (they can set it once with `SBATCH_ACCOUNT`, `SALLOC_ACCOUNT` and `SLURM_ACCOUNT`).
 - **Etiquette:** right-size model / `gpumem` / `--time`; don't hold an interactive GPU idle; `sbatch` long runs
@@ -125,8 +131,11 @@ echo "submitted $JOBID"
   `PENDING`/`RUNNING`. Cancel with `scancel "$JOBID"`.
 - **Check early, unasked:** once the expensive step should have started, read the log for progress and warnings
   (OOM, NCCL) and check GPU use. A smoke test on one GPU doesn't cover a run on several.
-- **Right-size the next run:** compare `MaxRSS` and `Elapsed` with what you asked for;
-  `get_inefficient_jobs --for-last-hours 24` lists your jobs that wasted CPU, RAM or GPU.
+- **Right-size the next run:** compare `MaxRSS` and `Elapsed` with what you asked for (about 1.3 × `MaxRSS`);
+  `get_inefficient_jobs --for-last-hours 24` lists your jobs that wasted CPU, RAM or GPU. Billing scales with
+  requested RAM: `references/cost.md`.
+- **Per-user caps:** `euler-caps` shows the caps on running GPUs, CPUs and RAM next to what your jobs use now. Run
+  it before an array or sweep; the caps are shared by all your sessions.
 
 ## When a job fails — symptom → cause → fix
 
@@ -144,6 +153,8 @@ success). `MaxRSS` is in KB unless suffixed.
 | network hang/timeout on download | no `eth_proxy` | `module load eth_proxy` |
 | `CANCELLED` right at start, no output | job startup took over 120 s, e.g. a slow `~/.bashrc` (conda init on work storage) | slim the shell startup (`/news/2026-01-12-slurm-upgrade/`) |
 | GPU job never schedules | model/VRAM your share can't provide | another model (`sbatch --test-only`); check `my_share_info` |
+| `PENDING (QOSMaxMemoryPerUser)` or another `QOSMax*` | per-user cap full, shared by all your jobs | `euler-caps`; shrink with `scontrol update JobId=<id> MinMemoryCPU=<MB>`, or wait |
+| W&B fails on a compute node, `eth_proxy` loaded | `api.wandb.ai` is in `no_proxy` | `WANDB_MODE=offline`; `wandb sync` from a login node |
 
 ## Job arrays (parallel, one task per item)
 
@@ -256,3 +267,5 @@ If `$SLURM_JOB_ID` is set (the session-start context says so), this session is i
 - Inside a job: plain `srun` is a step of this job; new allocations via `salloc`/`sbatch`; clear `SLURM_*` for
   `srun --jobid`.
 - Template: `assets/euler_job.sh`.
+- Off Euler: the `remote` skill, every command through `essh`. Sizing and caps: `references/cost.md`,
+  `euler-caps`.

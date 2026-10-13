@@ -1,0 +1,61 @@
+#!/bin/bash
+# Restart the shared Euler ControlMaster (asks for your Euler password/MFA).
+# This drops every open agent session on it, including leftover sessions whose
+# local client is gone but which still count against Euler's ~10-session cap.
+# essh calls waiting for a slot, or refused by a full connection, retry and then go through;
+# calls in flight when the connection restarts fail (exit 255), so it asks first when there
+# are any (--force skips the question). Run it in your own terminal: agents cannot answer
+# the password/MFA prompt. Works with or without a
+# `Host euler-agents` block in ~/.ssh/config (same fallback settings as essh).
+# Per-user settings live OUTSIDE the skill, in an optional file of KEY=value lines
+# (EULER_USER, ESSH_HOST, ESSH_SLOTS, ESSH_TIMEOUT, ESSH_WAIT). It is parsed, never
+# executed, and a variable already set in the environment wins. Same block in essh.
+CONF=${EULER_HPC_CONFIG:-$HOME/.config/euler-hpc/config.env}
+if [ -r "$CONF" ]; then
+    while IFS='=' read -r k v || [ -n "$k" ]; do
+        k=${k#export }; k=${k//[[:space:]]/}
+        case $k in EULER_USER|ESSH_HOST|ESSH_SLOTS|ESSH_TIMEOUT|ESSH_WAIT) ;; *) continue ;; esac
+        v=${v%%#*}; v=${v//[[:space:]]/}; v=${v//\"/}; v=${v//\'/}
+        [ -z "${!k}" ] && [ -n "$v" ] && printf -v "$k" %s "$v"
+    done < "$CONF"
+fi
+HOST=${ESSH_HOST:-euler-agents}
+SSH_OPTS=()
+if [ "$(ssh -G "$HOST" 2>/dev/null | awk '/^hostname /{print $2}')" = "$HOST" ]; then
+    if [ -z "$EULER_USER" ]; then
+        echo "euler-reconnect: no Euler username configured. Ask the user for their ETH username, then either" >&2
+        echo "  mkdir -p ~/.config/euler-hpc && echo 'EULER_USER=<eth-username>' > ~/.config/euler-hpc/config.env" >&2
+        echo "  or add a 'Host $HOST' block to ~/.ssh/config (skills/remote/SKILL.md)" >&2
+        exit 78
+    fi
+    SSH_OPTS=(-o HostName=euler.ethz.ch -o User="$EULER_USER" -o ControlPath="/tmp/ssh-mux-%i-$HOST"
+              -o ControlPersist=28800 -o ServerAliveInterval=60 -o ServerAliveCountMax=3)
+fi
+sock=$(ssh "${SSH_OPTS[@]}" -G "$HOST" 2>/dev/null | awk '/^controlpath /{print $2}')
+if [ -z "$sock" ] || [ "$sock" = none ]; then
+    echo "euler-reconnect: ~/.ssh/config has Host $HOST but no ControlPath; add one or remove the block" >&2; exit 1
+fi
+# essh calls in flight hold a slot: a flock on $DIR/slotN (Linux) or a lock dir with a live pid (macOS).
+DIR=/tmp/essh-$(id -u)
+busy=0
+for (( i = 1; i <= ${ESSH_SLOTS:-6}; i++ )); do
+    if command -v flock >/dev/null 2>&1 && [ -f "$DIR/slot$i" ]; then
+        flock -n "$DIR/slot$i" true 2>/dev/null || busy=$((busy + 1))
+    elif p=$(cat "$DIR/slot$i.lock/pid" 2>/dev/null) && kill -0 "$p" 2>/dev/null; then
+        busy=$((busy + 1))
+    fi
+done
+if [ "$busy" -gt 0 ] && [ "$1" != "--force" ]; then
+    echo "euler-reconnect: $busy essh call(s) are running on $HOST; restarting the connection makes them fail." >&2
+    if [ -t 0 ]; then
+        printf 'Restart anyway? [y/N] ' >&2; read -r ans
+        case $ans in [yY]*) ;; *) echo "not restarted" >&2; exit 1 ;; esac
+    else
+        echo "Wait for them (see $DIR/log), or rerun with --force." >&2; exit 1
+    fi
+fi
+ssh "${SSH_OPTS[@]}" -O exit "$HOST" 2>/dev/null
+pkill -u "$(id -u)" -f "^ssh .*-fN $HOST\$" 2>/dev/null
+sleep 1
+rm -f "$sock" ~/.ssh/sockets/"$HOST"   # stale socket (also an older location)
+ssh "${SSH_OPTS[@]}" -o ControlMaster=yes -fN "$HOST" && ssh "${SSH_OPTS[@]}" -O check "$HOST"

@@ -1,0 +1,165 @@
+#!/bin/bash
+# essh — run a command on Euler through one shared ControlMaster connection, safely.
+#
+# Euler's sshd allows only ~10 concurrent sessions per connection, and a fresh
+# login needs MFA, so all agents on this machine share those slots. This wrapper:
+#   * caps concurrent sessions from this host (ESSH_SLOTS, default 6) and queues the rest;
+#   * runs the command under `timeout` ON EULER, so the slot is freed even if the
+#     local client is killed (a killed local ssh otherwise leaves the remote command
+#     running and the slot occupied);
+#   * uses BatchMode, so it fails fast instead of prompting when the master is down.
+#
+# For agents running on another machine than Euler (a laptop, a workstation); on Euler,
+# run commands directly. Portable: Linux and macOS (bash 3.2). Uses flock/timeout when
+# present, otherwise mkdir lock dirs and a perl timer. Needs no install: without a
+# `Host euler-agents` block in ~/.ssh/config it supplies the connection settings itself
+# (it then needs the user's ETH username, see EULER_USER below).
+#
+# Usage:  essh [-t SECONDS] 'remote command'      (default 120 s, max 900 s)
+#         echo data | essh 'cat > file'
+#         rsync -e essh ... euler-agents:/path ...   (gets the long-transfer timeout)
+# Long-running work (du over big trees, training, scoring) belongs in sbatch, not here.
+#
+# Env: ESSH_HOST (ssh host alias, default euler-agents), ESSH_SLOTS (6), ESSH_TIMEOUT (120),
+#      ESSH_WAIT (max seconds to wait for a slot, 600), EULER_USER (ETH username; no
+#      default, only needed when ~/.ssh/config has no Host block for the alias).
+# Exit: 124 timeout, 75 no free slot, 78 no username configured, 255 ssh failure.
+
+# Per-user settings live OUTSIDE the skill, in an optional file of KEY=value lines
+# (EULER_USER, ESSH_HOST, ESSH_SLOTS, ESSH_TIMEOUT, ESSH_WAIT). It is parsed, never
+# executed, and a variable already set in the environment wins. Same block in euler-reconnect.
+CONF=${EULER_HPC_CONFIG:-$HOME/.config/euler-hpc/config.env}
+if [ -r "$CONF" ]; then
+    while IFS='=' read -r k v || [ -n "$k" ]; do
+        k=${k#export }; k=${k//[[:space:]]/}
+        case $k in EULER_USER|ESSH_HOST|ESSH_SLOTS|ESSH_TIMEOUT|ESSH_WAIT) ;; *) continue ;; esac
+        v=${v%%#*}; v=${v//[[:space:]]/}; v=${v//\"/}; v=${v//\'/}
+        [ -z "${!k}" ] && [ -n "$v" ] && printf -v "$k" %s "$v"
+    done < "$CONF"
+fi
+
+HOST=${ESSH_HOST:-euler-agents}
+SLOTS=${ESSH_SLOTS:-6}
+T=${ESSH_TIMEOUT:-120}
+WAIT=${ESSH_WAIT:-600}
+MAXT=900
+DIR=/tmp/essh-$(id -u)
+# Slot locks, logs and stderr live here: it must be ours and private, or another user on a shared
+# machine could pre-create it and plant symlinks that our writes would follow.
+mkdir -m 700 "$DIR" 2>/dev/null
+if [ -L "$DIR" ] || [ ! -d "$DIR" ] || [ ! -O "$DIR" ] || ! chmod 700 "$DIR" 2>/dev/null; then
+    echo "essh: $DIR is not a private directory owned by you; remove it and try again" >&2; exit 2
+fi
+
+# Called by rsync -e: args are [ssh opts...] euler-agents rsync --server ...
+if [[ "$*" == *" rsync --server "* || "$1 $2" == *"rsync --server"* ]]; then
+    while [ $# -gt 0 ] && [ "$1" != "$HOST" ]; do shift; done
+    shift
+    T=${ESSH_TIMEOUT:-$MAXT}
+    RSYNC=1
+fi
+[ "$1" = "$HOST" ] && shift
+if [ "$1" = "-t" ]; then T=$2; shift 2; fi
+[ "$1" = "--" ] && shift
+if [ $# -eq 0 ]; then echo "essh: no command given (interactive shells: use ssh $HOST)" >&2; exit 2; fi
+if [ "$T" -gt "$MAXT" ] 2>/dev/null; then
+    echo "essh: timeout $T s > $MAXT s; run long work via sbatch on Euler instead" >&2; exit 2
+fi
+CMD="$*"
+
+# No ~/.ssh/config entry for $HOST (ssh -G then echoes the alias as hostname):
+# use the Host block settings from skills/remote/SKILL.md. Must match euler-reconnect.
+# ControlMaster=auto: if Euler accepts this machine's SSH key without MFA, the first
+# call becomes the shared master; otherwise BatchMode fails fast -> euler-reconnect.
+SSH_OPTS=()
+if [ "$(ssh -G "$HOST" 2>/dev/null | awk '/^hostname /{print $2}')" = "$HOST" ]; then
+    if [ -z "$EULER_USER" ]; then
+        echo "essh: no Euler username configured. Ask the user for their ETH username, then either" >&2
+        echo "  mkdir -p ~/.config/euler-hpc && echo 'EULER_USER=<eth-username>' > ~/.config/euler-hpc/config.env" >&2
+        echo "  or add a 'Host $HOST' block to ~/.ssh/config (skills/remote/SKILL.md)" >&2
+        exit 78
+    fi
+    SSH_OPTS=(-o HostName=euler.ethz.ch -o User="$EULER_USER" -o ControlPath="/tmp/ssh-mux-%i-$HOST"
+              -o ControlMaster=auto -o ControlPersist=28800 -o ServerAliveInterval=60 -o ServerAliveCountMax=3)
+fi
+RECONNECT="bash '$(cd "$(dirname "$0")" && pwd)/euler-reconnect'"
+
+# Local timeout: GNU timeout, Homebrew gtimeout, else a perl timer (TERM, then KILL after 10 s).
+ltimeout() {
+    local t=$1; shift
+    if command -v timeout >/dev/null 2>&1; then timeout -k 10 "$t" "$@"
+    elif command -v gtimeout >/dev/null 2>&1; then gtimeout -k 10 "$t" "$@"
+    else perl -e '
+        my $t = shift; my $pid = fork; die "fork: $!" unless defined $pid;
+        if (!$pid) { exec @ARGV or exit 127 }
+        $SIG{ALRM} = sub { kill "TERM", $pid;
+            for (1..10) { exit 124 if waitpid($pid, 1) > 0; sleep 1 }
+            kill "KILL", $pid; waitpid($pid, 0); exit 124 };
+        alarm $t; waitpid($pid, 0); my $s = $?;
+        exit($s & 127 ? 128 + ($s & 127) : $s >> 8);' "$t" "$@"
+    fi
+}
+
+# Slot locks. flock (Linux): the kernel releases the lock when we die, and slot files
+# are shared with older essh versions. Without flock (macOS): mkdir lock dirs holding
+# our PID; a dir whose PID is gone is stale and reclaimed.
+LOCKDIR=
+trap '[ -n "$LOCKDIR" ] && rm -rf "$LOCKDIR"' EXIT
+trap 'exit 129' HUP; trap 'exit 130' INT; trap 'exit 143' TERM
+acquire() {
+    local i d p
+    for (( i = 1; i <= SLOTS; i++ )); do
+        if command -v flock >/dev/null 2>&1; then
+            exec 9>"$DIR/slot$i"
+            if flock -n 9; then SLOT=$i; return 0; fi
+            exec 9>&-
+        else
+            d=$DIR/slot$i.lock
+            if mkdir "$d" 2>/dev/null; then
+                echo $$ > "$d/pid"; LOCKDIR=$d; SLOT=$i; return 0
+            fi
+            p=$(cat "$d/pid" 2>/dev/null)
+            if [ -n "$p" ] && ! kill -0 "$p" 2>/dev/null; then
+                rm -rf "$d"                                  # holder died (e.g. kill -9)
+            elif [ -z "$p" ] && [ -n "$(find "$d" -maxdepth 0 -mmin +1 2>/dev/null)" ]; then
+                rm -rf "$d"                                  # died between mkdir and pid write
+            fi
+        fi
+    done
+    return 1
+}
+
+start=$(date +%s)
+until acquire; do
+    if [ $(( $(date +%s) - start )) -ge "$WAIT" ]; then
+        echo "essh: no free Euler slot after ${WAIT}s (all $SLOTS busy, see $DIR/log)" >&2; exit 75
+    fi
+    sleep 3
+done
+echo "$(date '+%F %T') pid=$$ ppid=$PPID slot=$SLOT t=$T start ${CMD:0:120}" >> "$DIR/log"
+
+if [ -n "$RSYNC" ]; then
+    remote="timeout -k 10 $T $CMD"
+else
+    remote="timeout -k 10 $T bash -c $(printf '%q' "$CMD")"
+fi
+# Retry while the master refuses sessions (Euler's per-connection cap is full);
+# a refused session has not read stdin yet, so retrying is safe.
+err=$DIR/err.$$
+while :; do
+    ltimeout $((T + 60)) ssh "${SSH_OPTS[@]}" -o BatchMode=yes -o ConnectTimeout=20 "$HOST" "$remote" 2>"$err"
+    rc=$?
+    if [ $rc -eq 255 ] && grep -q "Session open refused" "$err" \
+       && [ $(( $(date +%s) - start )) -lt "$WAIT" ]; then
+        echo "$(date '+%F %T') pid=$$ slot=$SLOT refused, retrying" >> "$DIR/log"
+        sleep 15; continue
+    fi
+    break
+done
+cat "$err" >&2; rm -f "$err"
+if [ "$rc" -eq 255 ] && ! ssh "${SSH_OPTS[@]}" -O check "$HOST" 2>/dev/null; then
+    echo "essh: the $HOST master is down; the user must run (password + MFA): $RECONNECT" >&2
+fi
+[ "$rc" -eq 124 ] && echo "essh: command hit the ${T}s timeout (killed on Euler too)" >&2
+echo "$(date '+%F %T') pid=$$ slot=$SLOT rc=$rc took=$(( $(date +%s) - start ))s" >> "$DIR/log"
+exit "$rc"

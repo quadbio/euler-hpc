@@ -10,6 +10,8 @@ links each job to the Claude session that submitted it.
 | --- | --- |
 | `hooks/` | On Euler only, at session start: node and allocation, your settings, always-on rules (nodes, inline vs Slurm, modules, storage, snapshots, cancelling). |
 | `skills/euler-hpc/` | Slurm batch jobs, GPU jobs, arrays, interactive allocations, monitoring and failures; software, containers, moving data. An sbatch template. Loaded on demand. |
+| `skills/remote/`, `bin/essh`, `bin/euler-reconnect` | `/euler-hpc:remote`, for sessions on a laptop or another server: every command to Euler through one shared SSH connection, within Euler's per-connection session limit and with a timeout enforced on Euler; looking at files and copying data either way; restoring the connection after an MFA login. |
+| `bin/euler-caps` | Per-user caps on running GPUs, CPUs and RAM, next to what your jobs use now. |
 | `skills/jobs/`, `bin/euler-jobs` | `/euler-hpc:jobs`: your Claude sessions on Euler, each with its tmux window, status, background commands, PRs and jobs; what needs you on top. |
 
 Not affiliated with ETH Zurich; the [Euler docs](https://docs.hpc.ethz.ch/) are the reference.
