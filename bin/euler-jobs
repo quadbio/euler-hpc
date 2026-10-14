@@ -442,9 +442,9 @@ def main() -> None:
         texts = {kind: texts[:3] + [f"+{len(texts) - 3} more"] * (len(texts) > 3) for kind, texts in commands.items()}
         return "; ".join([word] + [f"{kind}: {' · '.join(t)}" for kind, t in texts.items()])
 
-    # What needs the user in the sessions' work: failed jobs nobody watches (an open session handles its own, unless
-    # it went idle with nothing running before they ended), closed sessions with live jobs, sessions waiting for an
-    # answer, results nobody has looked at
+    # What needs the user in the sessions' work: failed jobs nobody watches (a session known to be open handles its
+    # own, unless it went idle with nothing running before they ended), closed sessions with live jobs, sessions
+    # waiting for an answer, results nobody has looked at
     attention = []
     for sid, js in by_session.items():
         who = name(sid)
@@ -452,7 +452,10 @@ def main() -> None:
         closed = entry.get("local", True) and not entry.get("alive")
         idle = entry.get("alive") and entry.get("status") in ("idle", "shell") and not info[sid]["cmds"]
         idle_since = entry.get("statusUpdatedAt", 0) / 1000
-        failed = [j for j in js if j["state"] in FAILED and (closed or idle and (j.get("end") or 0) > idle_since)]
+        failed = [
+            j for j in js
+            if j["state"] in FAILED and (not entry.get("alive") or idle and (j.get("end") or 0) > idle_since)
+        ]  # fmt: skip
         for j in failed[:3]:
             req = re.search(r"mem=([\w.]+)", j.get("tres", ""))
             oom = f" ({req[1]})" if j["state"] == "OUT_OF_MEMORY" and req else ""

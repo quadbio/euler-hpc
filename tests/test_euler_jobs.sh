@@ -1,6 +1,6 @@
 #!/bin/sh
-# Test bin/euler-jobs against stub `squeue`, `sacct`, `tmux` and `gh`, a working, an idle and a closed session in
-# Claude Code's session registry, and a transcript. Runs on Linux with python3 and bash.
+# Test bin/euler-jobs against stub `squeue`, `sacct`, `tmux` and `gh`, a working, an idle, a closed and another node's
+# session in Claude Code's session registry, and a transcript. Runs on Linux with python3 and bash.
 set -eu
 
 jobs_cmd="$(cd "$(dirname "$0")/.." && pwd)/bin/euler-jobs"
@@ -12,7 +12,7 @@ mkdir -p "$tmp/bin" "$tmp/claude/sessions" "$tmp/claude/projects/p"
 
 # Jobs: 101, the suspended 104 and the array 200 from session a (job environment), 103 from session b's directory,
 # 102 hosts session a, 99 and array task 36_1 failed in session a, 95 in b's directory; 105 runs and 94 failed in
-# session c; 97, 98 and the stepped array 300 from outside Claude
+# session c, 93 failed in session d; 97, 98 and the stepped array 300 from outside Claude
 cat >"$tmp/bin/squeue" <<'EOF'
 #!/bin/sh
 echo '101|RUNNING|1:00:00|4:00:00|2026-01-01T10:00:00|2026-01-01T10:00:00|None|eu-g1-1|gres/gpu:nvidia_rtx_4090:1|N/A|8|train_1|'
@@ -30,8 +30,8 @@ cat >"$tmp/bin/sacct" <<'EOF'
 #!/bin/sh
 case "$*" in
 --env-vars*)
-	for job in 101 104 99 200 36 105 94; do
-		case $job in 105 | 94) sid=cccccccc-3333 ;; *) sid=aaaaaaaa-1111 ;; esac
+	for job in 101 104 99 200 36 105 94 93; do
+		case $job in 105 | 94) sid=cccccccc-3333 ;; 93) sid=dddddddd-4444 ;; *) sid=aaaaaaaa-1111 ;; esac
 		printf 'Environment used for %s (must be batch to display)\n---\nCLAUDE_CODE_SESSION_ID=%s\n' "$job" "$sid"
 	done
 	exit 0 ;;
@@ -43,6 +43,7 @@ echo '99|99|OUT_OF_MEMORY|00:05:00|01:00:00|2026-01-01T09:00:00|2026-01-01T12:34
 echo '36_1|37|FAILED|00:05:00|01:00:00|2026-01-01T09:00:00|2026-01-01T12:34:56|cpu=1|/c/repo|logs/%x-%j.out|arr'
 echo '105|105|RUNNING|00:00:30|01:00:00|2026-01-01T10:00:00|Unknown|cpu=1|/c/idle|out.log|probe_2'
 echo '94|94|FAILED|00:05:00|01:00:00|2026-01-01T09:00:00|2026-01-01T12:34:56|cpu=1|/c/idle|logs/%x-%j.out|probe_1'
+echo '93|93|NODE_FAIL|00:05:00|01:00:00|2026-01-01T09:00:00|2026-01-01T12:34:56|cpu=1|/c/far|logs/%x-%j.out|far'
 echo '95|95|TIMEOUT|01:00:00|01:00:00|2026-01-01T09:00:00|2026-01-01T12:34:56|cpu=1|/c/other|logs/%x-%j.out|clean'
 echo '98|98|CANCELLED by 123|00:00:01|01:00:00|2026-01-01T09:00:00|2026-01-01T10:00:00|cpu=1|/elsewhere|o|old'
 echo '97|97|COMPLETED|00:10:00|01:00:00|2026-01-01T09:00:00|2026-01-01T10:00:00|cpu=1|/elsewhere|o|manual'
@@ -55,7 +56,7 @@ EOF
 chmod +x "$tmp/bin/"*
 
 # Session a: a live process whose shell runs a background command, inside job 102; session b: closed; session c: a
-# live process that went idle with nothing running before its job 94 failed
+# live process that went idle with nothing running before its job 94 failed; session d: on another node, open or not
 q="'\"'\"'"  # how Claude Code quotes a single quote inside the command it evals
 # shellcheck disable=SC2016 # $0 is the inner shell's
 env SLURM_JOB_ID=102 bash -c 'bash -c "$0"; :' "eval 'echo ${q}x${q} > /dev/null; sleep 37' < /dev/null && pwd -P > /dev/null" &
@@ -79,6 +80,10 @@ cat >"$tmp/claude/sessions/3.json" <<EOF
  "sessionId": "cccccccc-3333", "cwd": "/c/idle", "name": "idle-c", "nameSource": "user", "status": "idle",
  "statusUpdatedAt": $(date -d 2026-01-01T12:00:00 +%s)000, "updatedAt": $now}
 EOF
+cat >"$tmp/claude/sessions/4.json" <<EOF
+{"pid": 1, "procStart": "0", "pidDomain": "linux:elsewhere:pid:[1]", "sessionId": "dddddddd-4444", "cwd": "/c/far",
+ "name": "remote-d", "nameSource": "user", "updatedAt": $now}
+EOF
 cat >"$tmp/claude/projects/p/aaaaaaaa-1111.jsonl" <<'EOF'
 {"type":"custom-title","customTitle":"train-models","sessionId":"aaaaaaaa-1111"}
 {"type":"pr-link","prNumber":1,"prRepository":"org/repo","prUrl":"u"}
@@ -91,11 +96,12 @@ fail() { echo "FAIL: $1"; printf '%s\n' "$out"; exit 1; }
 has() { printf '%s\n' "$out" | grep -q -- "$1"; }
 
 out=$(run --session zzzz)
-has "^Euler jobs · .* · 2 open sessions · 3 running · 21 pending · 4 failed in 24h$" || fail "header"
+has "^Euler jobs · .* · 2 open sessions · 3 running · 21 pending · 5 failed in 24h$" || fail "header"
 has "^Host job 102 tunnel on eu-a2p-1, 4d23h left: runs 1 open session; never cancel it$" || fail "host job"
 ! has "^  ! train-models" || fail "an open session's failed jobs need the user"
 has "^  ! b-session: clean 95 TIMEOUT; log /c/other/logs/clean-95.out$" || fail "closed session's failed job"
 has "^  ! idle-c: probe_1 94 FAILED; log /c/idle/logs/probe_1-94.out$" || fail "failed after its session went idle"
+has "^  ! remote-d: far 93 NODE_FAIL; log /c/far/logs/far-93.out$" || fail "failed in a session not known to be open"
 has "^  ! b-session is closed but has 1 jobs queued or running$" || fail "closed session's job"
 has "^train-models  main:2  repo/tree$" || fail "session header"
 has "^  idle .*; background: Wait for training$" || fail "background command"
