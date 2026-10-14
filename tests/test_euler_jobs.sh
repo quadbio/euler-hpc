@@ -59,7 +59,7 @@ chmod +x "$tmp/bin/"*
 # live process that went idle with nothing running before its job 94 failed; session d: on another node, open or not
 q="'\"'\"'"  # how Claude Code quotes a single quote inside the command it evals
 # shellcheck disable=SC2016 # $0 is the inner shell's
-env SLURM_JOB_ID=102 bash -c 'bash -c "$0"; :' "eval 'echo ${q}x${q} > /dev/null; sleep 37' < /dev/null && pwd -P > /dev/null" &
+env SLURM_JOB_ID=102 bash -c 'bash -c "$0"; :' "eval 'echo ${q}x${q} > /dev/null; sleep 3600' < /dev/null && pwd -P > /dev/null" &
 claude=$!
 until pgrep -P "$claude" >/dev/null; do :; done
 machine=$(cat /etc/machine-id 2>/dev/null || echo none)
@@ -73,7 +73,7 @@ cat >"$tmp/claude/sessions/2.json" <<EOF
 {"pid": 1, "procStart": "0", "pidDomain": "linux:$machine:pid:[1]", "sessionId": "bbbbbbbb-2222", "cwd": "/c/other",
  "name": "b-session", "nameSource": "user", "updatedAt": $((now - 3600000))}
 EOF
-env -u SLURM_JOB_ID sleep 37 &
+env -u SLURM_JOB_ID sleep 3600 &
 idle=$!
 cat >"$tmp/claude/sessions/3.json" <<EOF
 {"pid": $idle, "procStart": "$(awk '{print $22}' "/proc/$idle/stat")", "pidDomain": "linux:$machine:pid:[1]",
@@ -88,7 +88,7 @@ cat >"$tmp/claude/projects/p/aaaaaaaa-1111.jsonl" <<'EOF'
 {"type":"custom-title","customTitle":"train-models","sessionId":"aaaaaaaa-1111"}
 {"type":"pr-link","prNumber":1,"prRepository":"org/repo","prUrl":"u"}
 {"type":"pr-link","prNumber":2,"prRepository":"org/repo","prUrl":"u"}
-{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"echo 'x' > /dev/null; sleep 37","description":"Wait for training","run_in_background":true}}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"echo 'x' > /dev/null; sleep 3600","description":"Wait for training","run_in_background":true}}]}}
 EOF
 
 run() { env -u LMOD_CMD -u COLUMNS -u TMUX_PANE ${cols:+COLUMNS=$cols} HOME="$tmp" CLAUDE_CONFIG_DIR="$tmp/claude" PATH="$tmp/bin:$PATH" python3 "$jobs_cmd" "$@"; }
