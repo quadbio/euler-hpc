@@ -26,7 +26,9 @@ sample", "hold a node for an hour", "why did my job fail?".
 sessions waiting for you first, then each session's status, background commands, PRs (open, merged, closed) and
 jobs, the calling session's on top. A job's session is the `CLAUDE_CODE_SESSION_ID` in the environment Slurm stores with each batch job, so jobs
 submitted by scripts count too; jobs without it (interactive allocations, `--export=NONE`) are matched by the
-directory they were submitted from. Sessions come from Claude Code's own records, PR states from `gh`.
+directory they were submitted from. Sessions come from Claude Code's own records, PR states from `gh`. The same
+overview runs in any shell on the node your sessions run on: link `bin/euler-jobs` from a checkout onto your `PATH`
+(`euler-jobs --help`).
 
 Settings, saved with `/plugin configure euler-hpc@quadbio` (the in-session `/plugin install` asks for them; a
 shell install doesn't). They hold what is specific to you on Euler, so your `CLAUDE.md` needn't.

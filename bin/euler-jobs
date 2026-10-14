@@ -362,7 +362,7 @@ def log(j: dict) -> str:
     path = re.sub(r"%(\w)", lambda m: subs.get(m[1], m[0]), j["stdout"])
     if not path.startswith("/") and j.get("workdir"):
         path = f"{j['workdir']}/{path}"
-    return path.replace(str(Path.home()), "~", 1)
+    return path.replace(str(Path.home()), "~", 1).replace(" ", "\u00a0")
 
 
 def where(cwd: str) -> str:
@@ -442,14 +442,17 @@ def main() -> None:
         texts = {kind: texts[:3] + [f"+{len(texts) - 3} more"] * (len(texts) > 3) for kind, texts in commands.items()}
         return "; ".join([word] + [f"{kind}: {' · '.join(t)}" for kind, t in texts.items()])
 
-    # What needs the user in the sessions' work: failed jobs of closed sessions (an open one handles its own),
-    # closed sessions with live jobs, sessions waiting for an answer, results nobody has looked at
+    # What needs the user in the sessions' work: failed jobs nobody watches (an open session handles its own, unless
+    # it went idle with nothing running before they ended), closed sessions with live jobs, sessions waiting for an
+    # answer, results nobody has looked at
     attention = []
     for sid, js in by_session.items():
         who = name(sid)
         entry = known.get(sid, {})
         closed = entry.get("local", True) and not entry.get("alive")
-        failed = [j for j in js if j["state"] in FAILED] if closed else []
+        idle = entry.get("alive") and entry.get("status") in ("idle", "shell") and not info[sid]["cmds"]
+        idle_since = entry.get("statusUpdatedAt", 0) / 1000
+        failed = [j for j in js if j["state"] in FAILED and (closed or idle and (j.get("end") or 0) > idle_since)]
         for j in failed[:3]:
             req = re.search(r"mem=([\w.]+)", j.get("tres", ""))
             oom = f" ({req[1]})" if j["state"] == "OUT_OF_MEMORY" and req else ""
@@ -462,10 +465,8 @@ def main() -> None:
         if entry.get("alive") and entry.get("status") == "waiting" and sid != own:
             attention.append(f"! {who} is waiting for you")
         ends = [j["end"] for j in js if j.get("end")]
-        idle_since = entry.get("statusUpdatedAt", 0) / 1000
-        if entry.get("alive") and entry.get("status") in ("idle", "shell") and not live and not info[sid]["cmds"]:
-            if ends and max(ends) > idle_since:
-                attention.append(f"! {who}: its jobs ended at {clock(max(ends))}, after it went idle")
+        if idle and not live and ends and max(ends) > idle_since:
+            attention.append(f"! {who}: its jobs ended at {clock(max(ends))}, after it went idle")
 
     cols = width()
 
