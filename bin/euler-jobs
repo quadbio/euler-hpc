@@ -36,11 +36,11 @@ def run(cmd: list[str], env: dict | None = None, timeout: int = 60) -> str:
 
 
 def width() -> int:
-    """The terminal's columns; when the output goes to Claude Code, its tmux pane's less the 2 its replies indent."""
+    """The terminal's columns; when the output goes to Claude Code, its tmux pane's less the 5 it indents output."""
     cols = shutil.get_terminal_size((0, 0)).columns
     if not cols and os.environ.get("TMUX_PANE"):
         text = run(["tmux", "display-message", "-p", "-t", os.environ["TMUX_PANE"], "#{pane_width}"], timeout=5).strip()
-        cols = int(text) - 2 if text.isdigit() else 0
+        cols = int(text) - 5 if text.isdigit() else 0
     return cols
 
 
@@ -373,7 +373,8 @@ def where(cwd: str) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    # Not __doc__: an installer may put its launcher, a string, above the docstring
+    parser = argparse.ArgumentParser(description="Your Slurm jobs and Claude Code sessions on Euler.")
     parser.add_argument("--mine", action="store_true", help="only this session, one line per live or failed job")
     parser.add_argument("--jobs", action="store_true", help="one line per live or failed job")
     parser.add_argument("--session", default=os.environ.get("CLAUDE_CODE_SESSION_ID", ""), help="this session's id")

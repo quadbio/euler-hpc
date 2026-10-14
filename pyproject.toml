@@ -1,0 +1,21 @@
+# Installs bin/euler-jobs as a command outside Claude Code: uv tool install git+https://github.com/quadbio/euler-hpc
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "euler-hpc"
+description = "Your Slurm jobs and Claude Code sessions on Euler: who submitted what, and who waits for what."
+dynamic = ["version"]
+requires-python = ">=3.10"
+license = "MIT"
+
+[tool.hatch.version]
+path = ".claude-plugin/plugin.json"
+pattern = '"version": "(?P<version>[^"]+)"'
+
+[tool.hatch.build.targets.wheel]
+bypass-selection = true
+
+[tool.hatch.build.targets.wheel.shared-scripts]
+"bin/euler-jobs" = "euler-jobs"
