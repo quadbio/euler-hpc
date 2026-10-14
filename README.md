@@ -22,9 +22,9 @@ run one Claude session per tmux window. Each session then starts inside an alloc
 fits, and goes through Slurm when it doesn't. Ask in plain words: "run this on a GPU", "run this for every
 sample", "hold a node for an hour", "why did my job fail?".
 
-`/euler-hpc:jobs` shows what your sessions are doing and waiting for: failed jobs, closed sessions with queued jobs
-and sessions waiting for you first, then each session's status, background commands, PRs (open, merged, closed) and
-jobs. A job's session is the `CLAUDE_CODE_SESSION_ID` in the environment Slurm stores with each batch job, so jobs
+`/euler-hpc:jobs` shows what your sessions are doing and waiting for: closed sessions with failed or queued jobs and
+sessions waiting for you first, then each session's status, background commands, PRs (open, merged, closed) and
+jobs, the calling session's on top. A job's session is the `CLAUDE_CODE_SESSION_ID` in the environment Slurm stores with each batch job, so jobs
 submitted by scripts count too; jobs without it (interactive allocations, `--export=NONE`) are matched by the
 directory they were submitted from. Sessions come from Claude Code's own records, PR states from `gh`.
 

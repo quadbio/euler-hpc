@@ -11,7 +11,7 @@ trap '[ -n "$claude" ] && stop "$claude"; rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin" "$tmp/claude/sessions" "$tmp/claude/projects/p"
 
 # Jobs: 101, the suspended 104 and the array 200 from session a (job environment), 103 from session b's directory,
-# 102 hosts session a, 99 and array task 36_1 failed in session a, 97, 98 and the stepped array 300 from outside Claude
+# 102 hosts session a, 99 and array task 36_1 failed in session a, 95 in b's directory, 97, 98 and the stepped array 300 from outside Claude
 cat >"$tmp/bin/squeue" <<'EOF'
 #!/bin/sh
 echo '101|RUNNING|1:00:00|4:00:00|2026-01-01T10:00:00|2026-01-01T10:00:00|None|eu-g1-1|gres/gpu:nvidia_rtx_4090:1|N/A|8|train_1|'
@@ -38,6 +38,7 @@ echo '101|101|RUNNING|01:00:00|04:00:00|2026-01-01T10:00:00|Unknown|cpu=8|/c/rep
 echo '103|103|PENDING|00:00:00|01:00:00|2026-01-01T10:00:00|Unknown|cpu=1|/c/other|out.log|prep'
 echo '99|99|OUT_OF_MEMORY|00:05:00|01:00:00|2026-01-01T09:00:00|2026-01-01T12:34:56|cpu=1,mem=4G|/c/repo|logs/%x-%j.out|eval'
 echo '36_1|37|FAILED|00:05:00|01:00:00|2026-01-01T09:00:00|2026-01-01T12:34:56|cpu=1|/c/repo|logs/%x-%j.out|arr'
+echo '95|95|TIMEOUT|01:00:00|01:00:00|2026-01-01T09:00:00|2026-01-01T12:34:56|cpu=1|/c/other|logs/%x-%j.out|clean'
 echo '98|98|CANCELLED by 123|00:00:01|01:00:00|2026-01-01T09:00:00|2026-01-01T10:00:00|cpu=1|/elsewhere|o|old'
 echo '97|97|COMPLETED|00:10:00|01:00:00|2026-01-01T09:00:00|2026-01-01T10:00:00|cpu=1|/elsewhere|o|manual'
 EOF
@@ -72,15 +73,15 @@ cat >"$tmp/claude/projects/p/aaaaaaaa-1111.jsonl" <<'EOF'
 {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"echo 'x' > /dev/null; sleep 37","description":"Wait for training","run_in_background":true}}]}}
 EOF
 
-run() { env -u LMOD_CMD HOME="$tmp" CLAUDE_CONFIG_DIR="$tmp/claude" PATH="$tmp/bin:$PATH" python3 "$jobs_cmd" "$@"; }
+run() { env -u LMOD_CMD -u COLUMNS -u TMUX_PANE ${cols:+COLUMNS=$cols} HOME="$tmp" CLAUDE_CONFIG_DIR="$tmp/claude" PATH="$tmp/bin:$PATH" python3 "$jobs_cmd" "$@"; }
 fail() { echo "FAIL: $1"; printf '%s\n' "$out"; exit 1; }
 has() { printf '%s\n' "$out" | grep -q -- "$1"; }
 
 out=$(run --session zzzz)
-has "^Euler jobs · .* · 1 open sessions · 2 running · 21 pending · 2 failed in 24h$" || fail "header"
+has "^Euler jobs · .* · 1 open sessions · 2 running · 21 pending · 3 failed in 24h$" || fail "header"
 has "^Host job 102 tunnel on eu-a2p-1, 4d23h left: runs 1 open session; never cancel it$" || fail "host job"
-has "^  ! train-models: eval 99 OUT_OF_MEMORY (4G); log /c/repo/logs/eval-99.out$" || fail "failed job"
-has "^  ! train-models: arr 36_1 FAILED; log /c/repo/logs/arr-37.out$" || fail "failed array task's log"
+! has "^  ! train-models" || fail "an open session's failed jobs need the user"
+has "^  ! b-session: clean 95 TIMEOUT; log /c/other/logs/clean-95.out$" || fail "closed session's failed job"
 has "^  ! b-session is closed but has 1 jobs queued or running$" || fail "closed session's job"
 has "^train-models  main:2  repo/tree$" || fail "session header"
 has "^  idle .*; background: Wait for training$" || fail "background command"
@@ -91,10 +92,17 @@ has "^  pending   10  sweep ×10$" || fail "array counted by task"
 has "^  ended      2  2 failed$" || fail "ended"
 has "^b-session  other$" || fail "closed session header"
 has "^  closed, last active 1h ago$" || fail "closed status"
-has "^  (1 of these jobs matched by directory only)$" || fail "directory match"
+has "^  (2 of these jobs matched by directory only)$" || fail "directory match"
 printf '%s\n' "$out" | grep -A4 "^Not from a Claude session" | grep -q "^  pending   10  steps ×10$" || fail "stepped array"
 printf '%s\n' "$out" | grep -A4 "^Not from a Claude session" | grep -q "^  ended      2  " || fail "unlinked"
 [ "$(printf '%s\n' "$out" | grep -c '102')" -eq 1 ] || fail "host job listed as a job"
+
+out=$(run --session bbbbbbbb-2222)
+printf '%s\n' "$out" | grep -m1 "^train-models  \|^b-session  " | grep -q "^b-session" || fail "this session first"
+
+out=$(cols=25 run --session zzzz)
+has "^    log /c/other/logs/clean-95.out$" || fail "wrapped with an indent"
+has "^       repo #2 open, #1 merged$" || fail "a repo's PRs kept together, under the first"
 
 out=$(run --mine --session aaaaaaaa-1111)
 has "^train-models  main:2  repo/tree  <- this session$" || fail "--mine header"
