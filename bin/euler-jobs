@@ -13,8 +13,10 @@ import json
 import os
 import re
 import shlex
+import shutil
 import socket
 import subprocess
+import textwrap
 import time
 from collections import Counter
 from datetime import date, datetime
@@ -31,6 +33,15 @@ def run(cmd: list[str], env: dict | None = None, timeout: int = 60) -> str:
         return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env).stdout
     except (OSError, subprocess.SubprocessError):
         return ""
+
+
+def width() -> int:
+    """The terminal's columns; when the output goes to Claude Code, its tmux pane's less the 5 it indents output."""
+    cols = shutil.get_terminal_size((0, 0)).columns
+    if not cols and os.environ.get("TMUX_PANE"):
+        text = run(["tmux", "display-message", "-p", "-t", os.environ["TMUX_PANE"], "#{pane_width}"], timeout=5).strip()
+        cols = int(text) - 5 if text.isdigit() else 0
+    return cols
 
 
 def seconds(text: str) -> int | None:
@@ -260,7 +271,7 @@ def pr_states(prs: set[tuple[str, int]]) -> dict[tuple[str, int], str]:
 
 
 def prs_text(prs: list[tuple[str, int]], states: dict) -> str:
-    """'repo #2 open, #1 merged · other #5 closed'."""
+    """'repo #2 open, #1 merged · other #5 closed', each repo's part unbroken by wrapping."""
     repos = {}
     for repo, n in prs:
         repos.setdefault(repo, []).append(n)
@@ -270,7 +281,8 @@ def prs_text(prs: list[tuple[str, int]], states: dict) -> str:
         for n in sorted(numbers):
             by_state.setdefault(states.get((repo, n), ""), []).append(f"#{n}")
         order = sorted(by_state, key=["open", "merged", "closed", ""].index)
-        parts.append(f"{repo.split('/')[-1]} " + ", ".join(" ".join(by_state[s]) + f" {s}".rstrip() for s in order))
+        part = f"{repo.split('/')[-1]} " + ", ".join(" ".join(by_state[s]) + f" {s}".rstrip() for s in order)
+        parts.append(part.replace(" ", "\u00a0"))
     return " · ".join(parts)
 
 
@@ -339,7 +351,7 @@ def job_line(j: dict) -> str:
     else:
         detail = f"ended {clock(j['end'])}" if j.get("end") else ""
         if j.get("stdout"):
-            detail += f", log {log(j)}"
+            detail += f", log\u00a0{log(j)}"
     return f"    {j['id']:<14} {j['name'][:34]:<34} {j['state']:<13} {detail}"
 
 
@@ -350,7 +362,7 @@ def log(j: dict) -> str:
     path = re.sub(r"%(\w)", lambda m: subs.get(m[1], m[0]), j["stdout"])
     if not path.startswith("/") and j.get("workdir"):
         path = f"{j['workdir']}/{path}"
-    return path.replace(str(Path.home()), "~", 1)
+    return path.replace(str(Path.home()), "~", 1).replace(" ", "\u00a0")
 
 
 def where(cwd: str) -> str:
@@ -361,7 +373,8 @@ def where(cwd: str) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    # Not __doc__: an installer may put its launcher, a string, above the docstring
+    parser = argparse.ArgumentParser(description="Your Slurm jobs and Claude Code sessions on Euler.")
     parser.add_argument("--mine", action="store_true", help="only this session, one line per live or failed job")
     parser.add_argument("--jobs", action="store_true", help="one line per live or failed job")
     parser.add_argument("--session", default=os.environ.get("CLAUDE_CODE_SESSION_ID", ""), help="this session's id")
@@ -430,46 +443,62 @@ def main() -> None:
         texts = {kind: texts[:3] + [f"+{len(texts) - 3} more"] * (len(texts) > 3) for kind, texts in commands.items()}
         return "; ".join([word] + [f"{kind}: {' · '.join(t)}" for kind, t in texts.items()])
 
-    # What needs the user in the sessions' work: failed jobs, closed sessions with live jobs, sessions waiting for
-    # an answer, results nobody has looked at
+    # What needs the user in the sessions' work: failed jobs nobody watches (a session known to be open handles its
+    # own, unless it went idle with nothing running before they ended), closed sessions with live jobs, sessions
+    # waiting for an answer, results nobody has looked at
     attention = []
     for sid, js in by_session.items():
         who = name(sid)
         entry = known.get(sid, {})
-        failed = [j for j in js if j["state"] in FAILED]
+        closed = entry.get("local", True) and not entry.get("alive")
+        idle = entry.get("alive") and entry.get("status") in ("idle", "shell") and not info[sid]["cmds"]
+        idle_since = entry.get("statusUpdatedAt", 0) / 1000
+        failed = [
+            j for j in js
+            if j["state"] in FAILED and (not entry.get("alive") or idle and (j.get("end") or 0) > idle_since)
+        ]  # fmt: skip
         for j in failed[:3]:
             req = re.search(r"mem=([\w.]+)", j.get("tres", ""))
             oom = f" ({req[1]})" if j["state"] == "OUT_OF_MEMORY" and req else ""
-            attention.append(f"! {who}: {j['name']} {j['id']} {j['state']}{oom}; log {log(j)}")
+            attention.append(f"! {who}: {j['name']} {j['id']} {j['state']}{oom}; log\u00a0{log(j)}")
         if len(failed) > 3:
             attention.append(f"! {who}: {len(failed) - 3} more failed (euler-jobs --jobs)")
         live = [j for j in js if j["live"]]
-        if entry.get("local") and not entry.get("alive") and live:
+        if closed and live:
             attention.append(f"! {who} is closed but has {sum(j['n'] for j in live)} jobs queued or running")
         if entry.get("alive") and entry.get("status") == "waiting" and sid != own:
             attention.append(f"! {who} is waiting for you")
         ends = [j["end"] for j in js if j.get("end")]
-        idle_since = entry.get("statusUpdatedAt", 0) / 1000
-        if entry.get("alive") and entry.get("status") in ("idle", "shell") and not live and not info[sid]["cmds"]:
-            if ends and max(ends) > idle_since:
-                attention.append(f"! {who}: its jobs ended at {clock(max(ends))}, after it went idle")
+        if idle and not live and ends and max(ends) > idle_since:
+            attention.append(f"! {who}: its jobs ended at {clock(max(ends))}, after it went idle")
+
+    cols = width()
+
+    def say(line: str, hang: int = 2) -> None:
+        """Print a line wrapped to the screen, continuing ``hang`` further in; a non-breaking space holds."""
+        lines = [line]
+        if 0 < cols < len(line):
+            indent = " " * (len(line) - len(line.lstrip()) + hang)
+            lines = textwrap.wrap(line, cols, subsequent_indent=indent, break_long_words=False, break_on_hyphens=False)
+        print("\n".join(lines).replace(" ", " "))
 
     pending = sum(r["n"] for r in rows if r["state"] == "PENDING")
     running = sum(r["n"] for r in rows if r["live"]) - pending
     failed = sum(r["n"] for r in rows if r["state"] in FAILED)
     head = [time.strftime("%H:%M"), f"{sum(e['alive'] for e in known.values())} open sessions"]
     head += [f"{running} running", f"{pending} pending", f"{failed} failed in {args.hours}h"]
-    print("Euler jobs · " + " · ".join(head))
+    say("Euler jobs · " + " · ".join(head))
     for job, n in hosts.items() if not args.mine else []:
         j = host_jobs.get(job)
         detail = f" {j['name']} on {j['node']}, {span(j['limit'] - j['elapsed'])} left" if j and j["limit"] else ""
-        print(f"Host job {job}{detail}: runs {n} open session{'s' * (n > 1)}; never cancel it")
+        say(f"Host job {job}{detail}: runs {n} open session{'s' * (n > 1)}; never cancel it")
     if attention:
         print("\nNeeds you")
-        print("\n".join(f"  {a}" for a in attention))
+        for a in attention:
+            say(f"  {a}")
 
     order = sorted(shown, key=lambda s: (
-        not any(j["live"] for j in by_session[s]), not by_session[s],
+        s != own, not any(j["live"] for j in by_session[s]), not by_session[s],
         -(known.get(s, {}).get("updatedAt") or 0),
     ))  # fmt: skip
     for sid in order:
@@ -481,26 +510,26 @@ def main() -> None:
         cwd = entry.get("cwd") or i.get("cwd", "")
         print()
         this = "<- this session" if sid == own else ""
-        print("  ".join(x for x in (name(sid), tmux, where(cwd) if cwd else "", this) if x))
-        print(f"  {status(sid)}")
+        say("  ".join(x for x in (name(sid), tmux, where(cwd) if cwd else "", this) if x))
+        say(f"  {status(sid)}")
         if i["prs"] and not args.mine:
-            print("  PRs  " + prs_text(i["prs"], states))
+            say("  PRs  " + prs_text(i["prs"], states), hang=5)
         for line in summary(js):
-            print(f"  {line}")
+            say(f"  {line}")
         if guessed := sum(j["n"] for j in js if j.get("guess")):
-            print(f"  ({guessed} of these jobs matched by directory only)")
+            say(f"  ({guessed} of these jobs matched by directory only)")
         if args.jobs or args.mine:
             for j in js:
                 if j["live"] or j["state"] in FAILED:
-                    print(job_line(j))
+                    say(job_line(j))
     if unlinked:
         print("\nNot from a Claude session")
         for line in summary(unlinked):
-            print(f"  {line}")
+            say(f"  {line}")
         if args.jobs:
             for j in unlinked:
                 if j["live"] or j["state"] in FAILED:
-                    print(job_line(j))
+                    say(job_line(j))
     if not shown and not unlinked:
         print("No jobs and no open sessions.")
 

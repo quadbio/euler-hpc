@@ -1,7 +1,7 @@
 {
   "name": "euler-hpc",
-  "version": "0.3.0",
-  "description": "Run coding agents efficiently on ETH Zurich's Euler cluster: the session's node, allocation, storage rules and your own setup at session start; a skill for Slurm jobs, software and data; and an overview of your sessions with their jobs and PRs.",
+  "version": "0.4.0",
+  "description": "Run coding agents efficiently on ETH Zurich's Euler cluster: the session's node, allocation, storage rules and your own setup at session start; a skill for Slurm jobs, software and data; and `euler-jobs`, an overview of your sessions with their jobs and PRs for you and your agents.",
   "author": {
     "name": "quadbio"
   },

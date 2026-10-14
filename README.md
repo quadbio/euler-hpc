@@ -10,7 +10,7 @@ links each job to the Claude session that submitted it.
 | --- | --- |
 | `hooks/` | On Euler only, at session start: node and allocation, your settings, always-on rules (nodes, inline vs Slurm, modules, storage, snapshots, cancelling). |
 | `skills/euler-hpc/` | Slurm batch jobs, GPU jobs, arrays, interactive allocations, monitoring and failures; software, containers, moving data. An sbatch template. Loaded on demand. |
-| `skills/jobs/`, `bin/euler-jobs` | `/euler-hpc:jobs`: your Claude sessions on Euler, each with its tmux window, status, background commands, PRs and jobs; what needs you on top. |
+| `bin/euler-jobs` | `euler-jobs`: your Claude sessions on Euler, each with its tmux window, status, background commands, PRs and jobs; what needs you on top. For you and your agents. |
 
 Not affiliated with ETH Zurich; the [Euler docs](https://docs.hpc.ethz.ch/) are the reference.
 
@@ -22,11 +22,13 @@ run one Claude session per tmux window. Each session then starts inside an alloc
 fits, and goes through Slurm when it doesn't. Ask in plain words: "run this on a GPU", "run this for every
 sample", "hold a node for an hour", "why did my job fail?".
 
-`/euler-hpc:jobs` shows what your sessions are doing and waiting for: failed jobs, closed sessions with queued jobs
-and sessions waiting for you first, then each session's status, background commands, PRs (open, merged, closed) and
-jobs. A job's session is the `CLAUDE_CODE_SESSION_ID` in the environment Slurm stores with each batch job, so jobs
-submitted by scripts count too; jobs without it (interactive allocations, `--export=NONE`) are matched by the
-directory they were submitted from. Sessions come from Claude Code's own records, PR states from `gh`.
+`euler-jobs` shows what your sessions are doing and waiting for: failed jobs no session watches, closed sessions
+with queued jobs and sessions waiting for you first, then each session's status, background commands, PRs (open,
+merged, closed) and jobs, the calling session's on top. Run it as `! euler-jobs` in a Claude session, or in any shell
+on the node your sessions run on (see Install); agents run `euler-jobs --mine` for their own jobs. A job's session is
+the `CLAUDE_CODE_SESSION_ID` in the environment Slurm stores with each batch job, so jobs submitted by scripts count
+too; jobs without it (interactive allocations, `--export=NONE`) are matched by the directory they were submitted
+from. Sessions come from Claude Code's own records, PR states from `gh`.
 
 Settings, saved with `/plugin configure euler-hpc@quadbio` (the in-session `/plugin install` asks for them; a
 shell install doesn't). They hold what is specific to you on Euler, so your `CLAUDE.md` needn't.
@@ -46,6 +48,10 @@ Slurm charges your default share. If you belong to several, set `SBATCH_ACCOUNT`
 
 Once, on Euler (all nodes share your home), from the
 [quadbio marketplace](https://github.com/quadbio/claude-plugins); then save the settings above.
+
+`euler-jobs` is on the `PATH` of Claude sessions. For your own shell:
+`uv tool install git+https://github.com/quadbio/euler-hpc`, updated with `uv tool upgrade euler-hpc`; that copy then
+comes first in Claude sessions too.
 
 ## Develop
 
