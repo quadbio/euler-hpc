@@ -54,8 +54,9 @@ def seconds(text: str) -> int | None:
 
 
 def stamp(text: str) -> float | None:
+    """An ISO time, local unless it names its zone; Python 3.10 reads no Z."""
     try:
-        return datetime.fromisoformat(text.strip()).timestamp()
+        return datetime.fromisoformat(re.sub(r"Z$", "+00:00", text.strip())).timestamp()
     except ValueError:
         return None
 
@@ -103,29 +104,32 @@ def gpus(tres: str) -> str:
     return ""
 
 
-def jobs(hours: int) -> list[dict]:
-    """Queued and running jobs from squeue, then those that ended in the last ``hours`` from sacct."""
+def jobs(since: str) -> list[dict]:
+    """Queued and running jobs from squeue, then from sacct those that ended after ``since``, a sacct --starttime."""
     rows = []
-    fields = "JobID State TimeUsed TimeLimit SubmitTime StartTime Reason NodeList tres-per-job tres-per-node NumCPUs"
-    squeue = ["squeue", "--me", "-h", "-t", "all", "-O", ",".join(f + ":|" for f in [*fields.split(), "Name"])]
+    fields = (
+        "JobID State TimeUsed TimeLimit SubmitTime StartTime Reason NodeList tres-per-job tres-per-node NumCPUs"
+        " Partition Name"
+    )
+    squeue = ["squeue", "--me", "-h", "-t", "all", "-O", ",".join(f + ":|" for f in fields.split())]
     for line in run(squeue).splitlines():
-        v = [x.strip() for x in line.removesuffix("|").split("|", 11)]
-        if len(v) == 12 and v[1] not in ENDED:  # ended jobs come from sacct
+        v = [x.strip() for x in line.removesuffix("|").split("|", 12)]
+        if len(v) == 13 and v[1] not in ENDED:  # ended jobs come from sacct
             rows.append({
                 "id": v[0], "state": v[1], "elapsed": seconds(v[2]), "limit": seconds(v[3]), "submit": stamp(v[4]),
                 "start": stamp(v[5]), "reason": v[6], "node": v[7], "gpus": gpus(v[8] + "," + v[9]),
-                "cpus": v[10], "name": v[11], "live": True,
+                "cpus": v[10], "partition": v[11], "name": v[12], "live": True,
             })  # fmt: skip
     live = {r["id"] for r in rows}
-    fields = "JobID,JobIDRaw,State,Elapsed,Timelimit,Submit,End,ReqTRES,WorkDir,StdOut,JobName"
+    fields = "JobID,JobIDRaw,State,Elapsed,Timelimit,Submit,End,ReqTRES,WorkDir,StdOut,Partition,JobName"
     sacct = ["sacct", "-X", "-n", "-P", f"--format={fields}"]
-    lines = run([*sacct, f"--starttime=now-{hours}hours"]).splitlines()
+    lines = run([*sacct, f"--starttime={since}"]).splitlines()
     if missing := live - {line.split("|", 1)[0] for line in lines}:  # queued since before the window
         more = run([*sacct, "-j", ",".join(sorted({re.split(r"[_+]", i)[0] for i in missing}))]).splitlines()
         lines += [line for line in more if line.split("|", 1)[0] in missing]
     for line in lines:
-        v = line.split("|", 10)
-        if len(v) < 11:
+        v = line.split("|", 11)
+        if len(v) < 12:
             continue
         if v[0] in live:  # squeue has the live state; sacct adds where the job runs from and logs to
             next(r for r in rows if r["id"] == v[0]).update(workdir=v[8], tres=v[7])
@@ -133,7 +137,7 @@ def jobs(hours: int) -> list[dict]:
             rows.append({
                 "id": v[0], "raw": v[1], "state": v[2].split(" ")[0], "elapsed": seconds(v[3]),
                 "limit": seconds(v[4]), "submit": stamp(v[5]), "end": stamp(v[6]), "tres": v[7], "workdir": v[8],
-                "stdout": v[9], "name": v[10], "live": False,
+                "stdout": v[9], "partition": v[10], "name": v[11], "live": False,
             })  # fmt: skip
     for r in rows:
         r["base"] = re.split(r"[_+]", r["id"])[0]
@@ -204,7 +208,7 @@ def children() -> dict[str, list[str]]:
 
 
 def transcript(sid: str, commands: list[str]) -> dict:
-    """A session's title, directory, PRs, last activity, and the description of each of ``commands``."""
+    """A session's title, directory, start, PRs, last activity, and the description of each of ``commands``."""
     info = {"prs": [], "commands": {}}
     path = next((CLAUDE / "projects").glob(f"*/{sid}.jsonl"), None)
     if not path:
@@ -228,6 +232,8 @@ def transcript(sid: str, commands: list[str]) -> dict:
                 info["prs"].append(pr)
     if m := re.search(rb'"cwd":"((?:[^"\\]|\\.)*)"', data):
         info["cwd"] = json.loads(b'"' + m[1] + b'"')
+    if m := re.search(rb'"timestamp":"([^"]+)"', data):  # its first record's, even when resumed
+        info["start"] = stamp(m[1].decode())
     for command in commands:
         needle = json.dumps(command)[1:-1].encode()
         for line in re.findall(rb"^.*" + re.escape(needle) + rb".*$", data, re.M):
@@ -338,6 +344,31 @@ def summary(js: list[dict]) -> list[str]:
     return lines
 
 
+def partitions(js: list[dict], start: float) -> list[str]:
+    """A Markdown table of the jobs submitted since ``start``, by partition, and a line on those not ended yet."""
+    since = datetime.fromtimestamp(start).strftime("%Y-%m-%d %H:%M")
+    js = [j for j in js if (j.get("submit") or start) >= start]  # sacct also lists jobs submitted before
+    if not js:
+        return [f"No jobs since {since}."]
+    cols = ["launched", "completed", "failed", "cancelled"]
+    count = {}
+    for j in js:
+        c = count.setdefault(j["partition"], Counter())
+        c["launched"] += j["n"]
+        if not j["live"]:
+            c["failed" if j["state"] in FAILED else j["state"].lower()] += j["n"]
+    lines = [f"Jobs since {since} by partition, an array counted by task:", ""]
+    lines += ["| partition | " + " | ".join(cols) + " |", "| --- |" + " ---: |" * len(cols)]
+    lines += [f"| {p} | " + " | ".join(str(c[k]) for k in cols) + " |" for p, c in sorted(count.items())]
+    pending = sum(j["n"] for j in js if j["state"] == "PENDING")
+    running = sum(j["n"] for j in js if j["live"]) - pending
+    if running or pending:
+        lines += ["", f"Not ended yet: {running} running, {pending} pending."]
+    if guessed := sum(j["n"] for j in js if j.get("guess")):
+        lines += ["", f"({guessed} of these jobs matched by directory only)"]
+    return lines
+
+
 def job_line(j: dict) -> str:
     """One job, for --jobs: id, name, state and what matters for that state."""
     if j["state"] == "PENDING":
@@ -377,12 +408,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Your Slurm jobs and Claude Code sessions on Euler.")
     parser.add_argument("--mine", action="store_true", help="only this session, one line per live or failed job")
     parser.add_argument("--jobs", action="store_true", help="one line per live or failed job")
+    parser.add_argument("--summary", action="store_true", help="this session's jobs since it started, by partition")
     parser.add_argument("--session", default=os.environ.get("CLAUDE_CODE_SESSION_ID", ""), help="this session's id")
     parser.add_argument("--hours", type=int, default=24, help="how far back to list ended jobs (default 24)")
     args = parser.parse_args()
     own = args.session
 
-    rows = jobs(args.hours)
+    since = f"now-{args.hours}hours"
+    if args.summary:
+        if not (start := transcript(own, []).get("start")):
+            parser.error(f"--summary: no transcript with a start time for session {own!r}")
+        since = datetime.fromtimestamp(start).strftime("%Y-%m-%dT%H:%M:%S")  # sacct reads local time
+    rows = jobs(since)
     known = registry()
     linked = job_sessions(sorted({r["base"] for r in rows}))
     by_dir = Counter(e.get("cwd") for e in known.values())
@@ -406,9 +443,12 @@ def main() -> None:
 
     shown = [r["session"] for r in rows if r["session"]] + [sid for sid, e in known.items() if e["alive"]]
     shown = list(dict.fromkeys(shown))
-    if args.mine:
+    if args.mine or args.summary:
         shown = [own] if own else []
         rows = [r for r in rows if r["session"] == own]
+    if args.summary:
+        print("\n".join(partitions(rows, start)))
+        return
     procs = children() if any(known.get(sid, {}).get("alive") for sid in shown) else {}
     info = {}
     for sid in shown:
