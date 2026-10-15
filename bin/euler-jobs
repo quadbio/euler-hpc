@@ -26,6 +26,7 @@ CLAUDE = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
 FAILED = {"FAILED", "TIMEOUT", "OUT_OF_MEMORY", "NODE_FAIL", "BOOT_FAIL", "DEADLINE", "PREEMPTED"}
 ENDED = FAILED | {"COMPLETED", "CANCELLED"}
 NOW = time.time()
+os.environ["SLURM_TIME_FORMAT"] = "standard"  # the ISO times stamp() reads, whatever the user's shell sets
 
 
 def run(cmd: list[str], env: dict | None = None, timeout: int = 60) -> str:
