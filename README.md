@@ -10,7 +10,8 @@ links each job to the Claude session that submitted it.
 | --- | --- |
 | `hooks/` | On Euler only, at session start: node and allocation, your settings, always-on rules (nodes, inline vs Slurm, modules, storage, snapshots, cancelling). |
 | `skills/euler-hpc/` | Slurm batch jobs, GPU jobs, arrays, interactive allocations, monitoring and failures; software, containers, moving data. An sbatch template. Loaded on demand. |
-| `bin/euler-jobs` | `euler-jobs`: your Claude sessions on Euler, each with its tmux window, status, background commands, PRs and jobs; what needs you on top. For you and your agents. |
+| `bin/euler-jobs` | `euler-jobs`: your Claude sessions on Euler, each with its tmux window, status, background commands, PRs and jobs; what needs you on top, and what the allocation they share uses now. For you and your agents. |
+| `bin/euler-step` | `euler-step <job> <command>`: runs a command in an allocation you hold, with all of its CPUs, memory and GPUs. For agents iterating on a node. |
 
 Not affiliated with ETH Zurich; the [Euler docs](https://docs.hpc.ethz.ch/) are the reference.
 
@@ -50,7 +51,7 @@ Slurm charges your default share. If you belong to several, set `SBATCH_ACCOUNT`
 Once, on Euler (all nodes share your home), from the
 [quadbio marketplace](https://github.com/quadbio/claude-plugins); then save the settings above.
 
-`euler-jobs` is on the `PATH` of Claude sessions. For your own shell:
+`euler-jobs` and `euler-step` are on the `PATH` of Claude sessions. For your own shell:
 `uv tool install git+https://github.com/quadbio/euler-hpc`, updated with `uv tool upgrade euler-hpc`; that copy then
 comes first in Claude sessions too.
 
@@ -62,6 +63,7 @@ claude --plugin-dir .            # try the hook and skill from this checkout
 pre-commit run --all-files
 sh tests/test_session_start.sh   # on Euler
 sh tests/test_euler_jobs.sh
+sh tests/test_euler_step.sh
 ```
 
 ## Release

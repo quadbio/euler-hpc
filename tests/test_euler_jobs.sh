@@ -135,7 +135,26 @@ has "^  idle .*; background: Wait for training$" || fail "--mine shows this sess
 has "^    101 .*RUNNING .*on eu-g1-1$" || fail "--mine lists live jobs"
 has "^    104 .*SUSPENDED .*on eu-g1-2$" || fail "--mine lists suspended jobs"
 has "^    99 .*OUT_OF_MEMORY .*log /c/repo/logs/eval-99.out$" || fail "--mine lists failed jobs"
-! has "b-session\|Not from\|Host job\|PRs" || fail "--mine shows only this session"
+has "^Host job 102 tunnel on eu-a2p-1, 4d23h left: runs 1 open session; never cancel it$" || fail "--mine host job"
+! has "b-session\|Not from\|PRs" || fail "--mine shows only this session"
+
+# A host job's use: what its processes hold, not the file cache; CPUs from its cpuset
+cg="$tmp/cgroup/job_102"
+mkdir -p "$cg"
+printf 'anon 9663676416\nfile 20401094656\nshmem 1073741824\n' >"$cg/memory.stat"
+echo 68719476736 >"$cg/memory.max"
+echo 12-19,24 >"$cg/cpuset.cpus.effective"
+echo "usage_usec 1000" >"$cg/cpu.stat"
+out=$(python3 - "$jobs_cmd" "$cg" <<'EOF'
+import importlib.machinery, importlib.util, sys
+from pathlib import Path
+loader = importlib.machinery.SourceFileLoader("euler_jobs", sys.argv[1])
+module = importlib.util.module_from_spec(importlib.util.spec_from_loader("euler_jobs", loader))
+loader.exec_module(module)
+print(module.usage(Path(sys.argv[2])))
+EOF
+)
+[ "$out" = "uses 0.0 of 9 CPUs and 10 of 64 GB now" ] || fail "usage"
 
 out=$(run --summary --session aaaaaaaa-1111)
 start=$(date -d 2025-12-31T12:00:00Z +%Y-%m-%dT%H:%M:%S)

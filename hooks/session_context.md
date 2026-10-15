@@ -4,9 +4,9 @@ submitting jobs, installing software or moving data in bulk. Always:
 
 1. Login nodes (`eu-login-*`) are for git, downloads and light work only, never computation. Compute nodes are
    firewalled: `module load eth_proxy` before anything that needs the internet. (`/connections/firewall/`)
-2. Before heavy work, check whether this session's allocation (above) covers its cores, memory, GPU and walltime;
-   measure rather than assume. If it fits, run inline; if not, or on a login node, go through Slurm.
-   (`/batchsystem/slurm/`)
+2. Before heavy work, check whether what is free in this session's allocation (above) covers its cores, memory,
+   GPU and walltime; measure rather than assume: other sessions may run in it too (`euler-jobs --mine` shows what
+   it uses now). If it fits, run inline; if not, or on a login node, go through Slurm. (`/batchsystem/slurm/`)
 3. No software stack loads by default: `module load stack/<version>`, then packages; search with `module spider`.
    Take versions from the docs, never hardcode them. (`/software/environment-modules/`)
 4. Pick storage by what the data needs (table below); `lquota [path]` shows usage. Keep work, data, environments and
