@@ -11,42 +11,47 @@ trap 'for p in $claude $idle; do stop "$p"; done; rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin" "$tmp/claude/sessions" "$tmp/claude/projects/p"
 
 # Jobs: 101, the suspended 104 and the array 200 from session a (job environment), 103 from session b's directory,
-# 102 hosts session a, 99 and array task 36_1 failed in session a, 95 in b's directory; 105 runs and 94 failed in
-# session c, 93 failed in session d; 97, 98 and the stepped array 300 from outside Claude
+# 102 hosts session a, 99 and array task 36_1 failed in session a, 92 completed and 91 was cancelled in it, 90 was
+# submitted before it started, 95 failed in b's directory; 105 runs and 94 failed in session c, 93 failed in session
+# d; 97, 98 and the stepped array 300 from outside Claude. sacct logs its arguments.
 cat >"$tmp/bin/squeue" <<'EOF'
 #!/bin/sh
-echo '101|RUNNING|1:00:00|4:00:00|2026-01-01T10:00:00|2026-01-01T10:00:00|None|eu-g1-1|gres/gpu:nvidia_rtx_4090:1|N/A|8|train_1|'
-echo '102|RUNNING|2:00|5-00:00:00|2026-01-01T10:00:00|2026-01-01T10:00:00|None|eu-a2p-1|N/A|N/A|8|tunnel|'
-echo '103|PENDING|0:00|1:00:00|2026-01-01T10:00:00|N/A|Priority|N/A|N/A|N/A|1|prep|'
-echo '105|RUNNING|0:30|1:00:00|2026-01-01T10:00:00|2026-01-01T10:00:00|None|eu-g1-4|N/A|N/A|1|probe_2|'
+echo '101|RUNNING|1:00:00|4:00:00|2026-01-01T10:00:00|2026-01-01T10:00:00|None|eu-g1-1|gres/gpu:nvidia_rtx_4090:1|N/A|8|gpu.4h|train_1|'
+echo '102|RUNNING|2:00|5-00:00:00|2026-01-01T10:00:00|2026-01-01T10:00:00|None|eu-a2p-1|N/A|N/A|8|normal.120h|tunnel|'
+echo '103|PENDING|0:00|1:00:00|2026-01-01T10:00:00|N/A|Priority|N/A|N/A|N/A|1|normal.4h|prep|'
+echo '105|RUNNING|0:30|1:00:00|2026-01-01T10:00:00|2026-01-01T10:00:00|None|eu-g1-4|N/A|N/A|1|normal.4h|probe_2|'
 case "$*" in *"-t all"*)  # squeue lists suspended and recently ended jobs only when asked for all states
-	echo '104|SUSPENDED|0:10|1:00:00|2026-01-01T10:00:00|2026-01-01T10:00:00|None|eu-g1-2|N/A|N/A|1|hold_1|'
-	echo '97|COMPLETED|10:00|1:00:00|2026-01-01T09:00:00|2026-01-01T09:00:00|None|eu-g1-3|N/A|N/A|1|manual|' ;;
+	echo '104|SUSPENDED|0:10|1:00:00|2026-01-01T10:00:00|2026-01-01T10:00:00|None|eu-g1-2|N/A|N/A|1|normal.4h|hold_1|'
+	echo '97|COMPLETED|10:00|1:00:00|2026-01-01T09:00:00|2026-01-01T09:00:00|None|eu-g1-3|N/A|N/A|1|normal.4h|manual|' ;;
 esac
-echo '200_[1-10]|PENDING|0:00|1:00:00|2026-01-01T10:00:00|N/A|Resources|N/A|N/A|N/A|8|sweep|'
-echo '300_[0-18:2]|PENDING|0:00|1:00:00|2026-01-01T10:00:00|N/A|Resources|N/A|N/A|N/A|8|steps|'
+echo '200_[1-10]|PENDING|0:00|1:00:00|2026-01-01T10:00:00|N/A|Resources|N/A|N/A|N/A|8|normal.4h|sweep|'
+echo '300_[0-18:2]|PENDING|0:00|1:00:00|2026-01-01T10:00:00|N/A|Resources|N/A|N/A|N/A|8|normal.4h|steps|'
 EOF
 cat >"$tmp/bin/sacct" <<'EOF'
 #!/bin/sh
+echo "$*" >>"$(dirname "$0")/../sacct.log"
 case "$*" in
 --env-vars*)
-	for job in 101 104 99 200 36 105 94 93; do
+	for job in 101 104 99 200 36 92 91 90 105 94 93; do
 		case $job in 105 | 94) sid=cccccccc-3333 ;; 93) sid=dddddddd-4444 ;; *) sid=aaaaaaaa-1111 ;; esac
 		printf 'Environment used for %s (must be batch to display)\n---\nCLAUDE_CODE_SESSION_ID=%s\n' "$job" "$sid"
 	done
 	exit 0 ;;
 *" -j "*) exit 0 ;;
 esac
-echo '101|101|RUNNING|01:00:00|04:00:00|2026-01-01T10:00:00|Unknown|cpu=8|/c/repo|out.log|train_1'
-echo '103|103|PENDING|00:00:00|01:00:00|2026-01-01T10:00:00|Unknown|cpu=1|/c/other|out.log|prep'
-echo '99|99|OUT_OF_MEMORY|00:05:00|01:00:00|2026-01-01T09:00:00|2026-01-01T12:34:56|cpu=1,mem=4G|/c/repo|logs/%x-%j.out|eval'
-echo '36_1|37|FAILED|00:05:00|01:00:00|2026-01-01T09:00:00|2026-01-01T12:34:56|cpu=1|/c/repo|logs/%x-%j.out|arr'
-echo '105|105|RUNNING|00:00:30|01:00:00|2026-01-01T10:00:00|Unknown|cpu=1|/c/idle|out.log|probe_2'
-echo '94|94|FAILED|00:05:00|01:00:00|2026-01-01T09:00:00|2026-01-01T12:34:56|cpu=1|/c/idle|logs/%x-%j.out|probe_1'
-echo '93|93|NODE_FAIL|00:05:00|01:00:00|2026-01-01T09:00:00|2026-01-01T12:34:56|cpu=1|/c/far|logs/%x-%j.out|far'
-echo '95|95|TIMEOUT|01:00:00|01:00:00|2026-01-01T09:00:00|2026-01-01T12:34:56|cpu=1|/c/other|logs/%x-%j.out|clean'
-echo '98|98|CANCELLED by 123|00:00:01|01:00:00|2026-01-01T09:00:00|2026-01-01T10:00:00|cpu=1|/elsewhere|o|old'
-echo '97|97|COMPLETED|00:10:00|01:00:00|2026-01-01T09:00:00|2026-01-01T10:00:00|cpu=1|/elsewhere|o|manual'
+echo '101|101|RUNNING|01:00:00|04:00:00|2026-01-01T10:00:00|Unknown|cpu=8|/c/repo|out.log|gpu.4h|train_1'
+echo '103|103|PENDING|00:00:00|01:00:00|2026-01-01T10:00:00|Unknown|cpu=1|/c/other|out.log|normal.4h|prep'
+echo '99|99|OUT_OF_MEMORY|00:05:00|01:00:00|2026-01-01T09:00:00|2026-01-01T12:34:56|cpu=1,mem=4G|/c/repo|logs/%x-%j.out|normal.4h|eval'
+echo '36_1|37|FAILED|00:05:00|01:00:00|2026-01-01T09:00:00|2026-01-01T12:34:56|cpu=1|/c/repo|logs/%x-%j.out|normal.4h|arr'
+echo '92|92|COMPLETED|00:10:00|01:00:00|2026-01-01T09:00:00|2026-01-01T10:00:00|cpu=1|/c/repo|o|normal.24h|done'
+echo '91|91|CANCELLED by 123|00:00:01|01:00:00|2026-01-01T09:00:00|2026-01-01T10:00:00|cpu=1|/c/repo|o|normal.24h|stop'
+echo '90|90|COMPLETED|00:10:00|01:00:00|2025-12-30T09:00:00|2026-01-01T10:00:00|cpu=1|/c/repo|o|normal.4h|before'
+echo '105|105|RUNNING|00:00:30|01:00:00|2026-01-01T10:00:00|Unknown|cpu=1|/c/idle|out.log|normal.4h|probe_2'
+echo '94|94|FAILED|00:05:00|01:00:00|2026-01-01T09:00:00|2026-01-01T12:34:56|cpu=1|/c/idle|logs/%x-%j.out|normal.4h|probe_1'
+echo '93|93|NODE_FAIL|00:05:00|01:00:00|2026-01-01T09:00:00|2026-01-01T12:34:56|cpu=1|/c/far|logs/%x-%j.out|normal.4h|far'
+echo '95|95|TIMEOUT|01:00:00|01:00:00|2026-01-01T09:00:00|2026-01-01T12:34:56|cpu=1|/c/other|logs/%x-%j.out|normal.4h|clean'
+echo '98|98|CANCELLED by 123|00:00:01|01:00:00|2026-01-01T09:00:00|2026-01-01T10:00:00|cpu=1|/elsewhere|o|normal.4h|old'
+echo '97|97|COMPLETED|00:10:00|01:00:00|2026-01-01T09:00:00|2026-01-01T10:00:00|cpu=1|/elsewhere|o|normal.4h|manual'
 EOF
 printf '#!/bin/sh\necho main:2\n' >"$tmp/bin/tmux"
 cat >"$tmp/bin/gh" <<'EOF'
@@ -88,7 +93,7 @@ cat >"$tmp/claude/projects/p/aaaaaaaa-1111.jsonl" <<'EOF'
 {"type":"custom-title","customTitle":"train-models","sessionId":"aaaaaaaa-1111"}
 {"type":"pr-link","prNumber":1,"prRepository":"org/repo","prUrl":"u"}
 {"type":"pr-link","prNumber":2,"prRepository":"org/repo","prUrl":"u"}
-{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"echo 'x' > /dev/null; sleep 3600","description":"Wait for training","run_in_background":true}}]}}
+{"type":"assistant","timestamp":"2025-12-31T12:00:00.000Z","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"echo 'x' > /dev/null; sleep 3600","description":"Wait for training","run_in_background":true}}]}}
 EOF
 
 run() { env -u LMOD_CMD -u COLUMNS -u TMUX_PANE ${cols:+COLUMNS=$cols} HOME="$tmp" CLAUDE_CONFIG_DIR="$tmp/claude" PATH="$tmp/bin:$PATH" python3 "$jobs_cmd" "$@"; }
@@ -109,7 +114,7 @@ has "^  PRs  repo #2 open, #1 merged$" || fail "PRs"
 has "^  running    2  train, hold$" || fail "running, suspended included"
 has "^ *1× rtx_4090 · up <1m–1h of 1h–4h$" || fail "running detail"
 has "^  pending   10  sweep ×10$" || fail "array counted by task"
-has "^  ended      2  2 failed$" || fail "ended"
+has "^  ended      5  2 failed, 2 completed, 1 cancelled · ran 10m of 1h limits$" || fail "ended"
 has "^b-session  other$" || fail "closed session header"
 has "^  closed, last active 1h ago$" || fail "closed status"
 has "^  (2 of these jobs matched by directory only)$" || fail "directory match"
@@ -131,5 +136,20 @@ has "^    101 .*RUNNING .*on eu-g1-1$" || fail "--mine lists live jobs"
 has "^    104 .*SUSPENDED .*on eu-g1-2$" || fail "--mine lists suspended jobs"
 has "^    99 .*OUT_OF_MEMORY .*log /c/repo/logs/eval-99.out$" || fail "--mine lists failed jobs"
 ! has "b-session\|Not from\|Host job\|PRs" || fail "--mine shows only this session"
+
+out=$(run --summary --session aaaaaaaa-1111)
+start=$(date -d 2025-12-31T12:00:00Z +%Y-%m-%dT%H:%M:%S)
+grep -q -- "--starttime=$start" "$tmp/sacct.log" || fail "window starts with the session"
+expected="Jobs since $(echo "$start" | tr T ' ' | cut -c1-16) by partition, an array counted by task:
+
+| partition | launched | completed | failed | cancelled |
+| --- | ---: | ---: | ---: | ---: |
+| gpu.4h | 1 | 0 | 0 | 0 |
+| normal.24h | 2 | 1 | 0 | 1 |
+| normal.4h | 13 | 0 | 2 | 0 |
+
+Not ended yet: 2 running, 10 pending."
+[ "$out" = "$expected" ] || fail "--summary"
+! run --summary --session zzzz 2>/dev/null || fail "--summary without a transcript"
 
 echo "ok"

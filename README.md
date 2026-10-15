@@ -25,7 +25,8 @@ sample", "hold a node for an hour", "why did my job fail?".
 `euler-jobs` shows what your sessions are doing and waiting for: failed jobs no session watches, closed sessions
 with queued jobs and sessions waiting for you first, then each session's status, background commands, PRs (open,
 merged, closed) and jobs, the calling session's on top. Run it as `! euler-jobs` in a Claude session, or in any shell
-on the node your sessions run on (see Install); agents run `euler-jobs --mine` for their own jobs. A job's session is
+on the node your sessions run on (see Install); agents run `euler-jobs --mine` for their own jobs, and
+`euler-jobs --summary` for a Markdown table of them by partition since the session started. A job's session is
 the `CLAUDE_CODE_SESSION_ID` in the environment Slurm stores with each batch job, so jobs submitted by scripts count
 too; jobs without it (interactive allocations, `--export=NONE`) are matched by the directory they were submitted
 from. Sessions come from Claude Code's own records, PR states from `gh`.

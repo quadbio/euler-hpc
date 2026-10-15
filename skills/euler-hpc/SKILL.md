@@ -109,7 +109,8 @@ echo "submitted $JOBID"
   resubmit.
 - **Which session submitted what:** `euler-jobs` reads a job's session from the environment Slurm stores with it,
   so keep `--export` at its default (add variables as `--export=ALL,VAR=…`). `euler-jobs --mine` lists this
-  session's jobs, `euler-jobs` all sessions'.
+  session's jobs, `euler-jobs` all sessions'; `euler-jobs --summary` counts this session's by partition since it
+  started, as a Markdown table for a report.
 - **Chain steps:** `sbatch -d afterok:"$JOBID" next.sh` starts only after that job succeeded.
 - **Poll, never block.** Do **not** use `tail -f` or `watch` — they hang a tool call until timeout. Take
   snapshots instead:
