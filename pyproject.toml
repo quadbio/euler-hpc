@@ -1,4 +1,4 @@
-# Installs bin/euler-jobs as a command outside Claude Code: uv tool install git+https://github.com/quadbio/euler-hpc
+# Installs bin/euler-jobs and bin/euler-step as commands outside Claude Code: uv tool install git+https://github.com/quadbio/euler-hpc
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -19,3 +19,4 @@ bypass-selection = true
 
 [tool.hatch.build.targets.wheel.shared-scripts]
 "bin/euler-jobs" = "euler-jobs"
+"bin/euler-step" = "euler-step"

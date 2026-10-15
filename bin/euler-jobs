@@ -105,6 +105,40 @@ def gpus(tres: str) -> str:
     return ""
 
 
+def job_cgroup(job: str) -> Path | None:
+    """This node's cgroup of Slurm job ``job``, beside the job this process runs in; None if there is none."""
+    try:
+        m = re.match(r"0::/(.*?/)job_\d+/", Path("/proc/self/cgroup").read_text())
+    except OSError:
+        return None
+    path = Path("/sys/fs/cgroup", m[1], f"job_{job}") if m else None
+    return path if path and path.is_dir() else None
+
+
+def usage(cgroup: Path) -> str:
+    """'uses 0.4 of 8 CPUs and 9 of 64 GB now' for a job's cgroup, CPUs over one second; '' if unreadable.
+
+    Memory is what processes hold, not the reclaimable file cache that Slurm's own figures (sstat) include.
+    """
+
+    def cpu_seconds() -> float:
+        return int(re.search(r"usage_usec (\d+)", (cgroup / "cpu.stat").read_text())[1]) / 1e6
+
+    try:
+        start, t0 = cpu_seconds(), time.monotonic()
+        mem = dict(line.split() for line in (cgroup / "memory.stat").read_text().splitlines())
+        used = (int(mem["anon"]) + int(mem["shmem"])) / 2**30
+        held = (cgroup / "memory.max").read_text().strip()
+        ranges = (r.partition("-") for r in (cgroup / "cpuset.cpus.effective").read_text().strip().split(","))
+        cpus = sum(int(hi or lo) - int(lo) + 1 for lo, _, hi in ranges)
+        time.sleep(1)
+        busy = (cpu_seconds() - start) / (time.monotonic() - t0)
+    except (OSError, KeyError, TypeError, ValueError):
+        return ""
+    of = f" of {int(held) / 2**30:.0f}" if held.isdigit() else ""
+    return f"uses {busy:.1f} of {cpus} CPUs and {used:.0f}{of} GB now"
+
+
 def jobs(since: str) -> list[dict]:
     """Queued and running jobs from squeue, then from sacct those that ended after ``since``, a sacct --starttime."""
     rows = []
@@ -431,14 +465,17 @@ def main() -> None:
             r["guess"] = True
 
     # The jobs that sessions run inside (an euler-tunnel or JupyterHub job): never a session's own job to cancel
-    hosts = Counter()
-    for entry in known.values():
+    hosts, host_of = Counter(), {}
+    for sid, entry in known.items():
         if entry["alive"]:
             try:
                 env = Path(f"/proc/{entry['pid']}/environ").read_bytes().split(b"\0")
-                hosts.update(e[13:].decode() for e in env if e.startswith(b"SLURM_JOB_ID="))
             except OSError:
-                pass
+                continue
+            for e in env:
+                if e.startswith(b"SLURM_JOB_ID="):
+                    host_of[sid] = e[13:].decode()
+                    hosts[host_of[sid]] += 1
     host_jobs = {r["id"]: r for r in rows if r["id"] in hosts and r["state"] == "RUNNING"}
     rows = [r for r in rows if r["id"] not in hosts]
 
@@ -529,10 +566,14 @@ def main() -> None:
     head = [time.strftime("%H:%M"), f"{sum(e['alive'] for e in known.values())} open sessions"]
     head += [f"{running} running", f"{pending} pending", f"{failed} failed in {args.hours}h"]
     say("Euler jobs · " + " · ".join(head))
-    for job, n in hosts.items() if not args.mine else []:
+    # Its use covers every session in it: what is left is what a session can run inline
+    for job, n in hosts.items():
+        if args.mine and job != host_of.get(own):
+            continue
         j = host_jobs.get(job)
         detail = f" {j['name']} on {j['node']}, {span(j['limit'] - j['elapsed'])} left" if j and j["limit"] else ""
-        say(f"Host job {job}{detail}: runs {n} open session{'s' * (n > 1)}; never cancel it")
+        use = usage(cgroup) if (cgroup := job_cgroup(job)) else ""
+        say(f"Host job {job}{detail}: runs {n} open session{'s' * (n > 1)}{'; ' * bool(use)}{use}; never cancel it")
     if attention:
         print("\nNeeds you")
         for a in attention:
