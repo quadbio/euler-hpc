@@ -7,13 +7,14 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin" "$tmp/shared" "$tmp/local"
 
-# Jobs: explore (123) runs, queued (124) waits, dup matches two
+# Jobs: explore (123) runs, queued (124) waits, dup matches two, wide (127) spans two nodes
 cat >"$tmp/bin/squeue" <<'EOF'
 #!/bin/sh
 case "$*" in
-*--name=explore* | *"-j 123"*) echo '123|RUNNING|4|eu-g1-1|50:00|None' ;;
-*--name=queued*) echo '124|PENDING|4|n/a|1:00:00|Priority' ;;
-*--name=dup*) printf '125|RUNNING|1|eu-g1-2|9:00|None\n126|RUNNING|1|eu-g1-3|9:00|None\n' ;;
+*--name=explore* | *"-j 123"*) echo '123|RUNNING|4|1|eu-g1-1|50:00|None' ;;
+*--name=wide*) echo '127|RUNNING|2|2|eu-g1-[4,5]|50:00|None' ;;
+*--name=queued*) echo '124|PENDING|4|1|n/a|1:00:00|Priority' ;;
+*--name=dup*) printf '125|RUNNING|1|1|eu-g1-2|9:00|None\n126|RUNNING|1|1|eu-g1-3|9:00|None\n' ;;
 esac
 EOF
 cat >"$tmp/bin/srun" <<'EOF'
@@ -48,6 +49,8 @@ out=$(run queued true) && fail "a pending job"
 has "^euler-step: job 124 is PENDING (Priority)$" || fail "pending"
 out=$(run dup true) && fail "two matches"
 has "^euler-step: 2 of your jobs match dup$" || fail "two matches"
+out=$(run wide true) && fail "two nodes"
+has "^euler-step: job 127 spans 2 nodes; a step runs one command on one node$" || fail "two nodes"
 out=$(run none true) && fail "no match"
 has "^euler-step: 0 of your jobs match none$" || fail "no match"
 out=$(run explore python "$tmp/local/a.py") && fail "a node-local argument"

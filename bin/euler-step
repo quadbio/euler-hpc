@@ -28,15 +28,19 @@ if [ -n "${TMPDIR:-}" ]; then
 fi
 
 if [[ $job =~ ^[0-9]+$ ]]; then sel=(-j "$job"); else sel=(--name="$job"); fi
-rows=$(squeue --me -h "${sel[@]}" -o '%i|%T|%C|%N|%L|%r' 2>/dev/null || true)
+rows=$(squeue --me -h "${sel[@]}" -o '%i|%T|%C|%D|%N|%L|%r' 2>/dev/null || true)
 n=$(grep -c . <<<"$rows" || true)
 if [ "$n" -ne 1 ]; then
 	echo "euler-step: $n of your jobs match $job" >&2
 	exit 1
 fi
-IFS='|' read -r id state cpus node left reason <<<"$rows"
+IFS="|" read -r id state cpus nodes node left reason <<<"$rows"
 if [ "$state" != RUNNING ]; then
 	echo "euler-step: job $id is $state ($reason)" >&2
+	exit 1
+fi
+if [ "$nodes" -ne 1 ]; then
+	echo "euler-step: job $id spans $nodes nodes; a step runs one command on one node" >&2
 	exit 1
 fi
 echo "euler-step: job $id on $node, $cpus CPUs, $left left" >&2
