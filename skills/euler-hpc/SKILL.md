@@ -227,9 +227,10 @@ node and from its resources. For a new allocation, use `salloc` or `sbatch`.
   nodes (`/connections/polybox/`); ask support before terabytes.
 - Globus for large transfers (`/services/globus/`), from the shell with `globus-cli` (`uv tool install
   globus-cli`; on a compute node, `module load eth_proxy` first):
-  - Euler's collections are `ETH Zurich#Euler Project`, `ETH Zurich#Euler Work` and `ETH Zurich#Euler Scratch`.
-    Paths are relative to the filesystem the collection's description names: `/cluster/project/<group>/x` is
-    `/<group>/x` in Project.
+  - Euler's collections: `ETH Zurich#Euler Project`, which the docs describe, and `ETH Zurich#Euler Work` and
+    `ETH Zurich#Euler Scratch`, which Globus lists but the docs don't yet; `globus api transfer GET
+    /endpoint_search -Q filter_fulltext=Euler` shows the current set. Paths are relative to the filesystem the
+    collection's description names: `/cluster/project/<group>/x` is `/<group>/x` in Project.
   - Logging in needs the human: run `globus login --no-local-server` where they can type, e.g. a tmux window;
     they open the URL and paste the code there themselves. Each mapped collection also needs one
     `globus session consent` for its `data_access` scope; one consent can bundle several collections.
