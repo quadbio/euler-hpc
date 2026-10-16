@@ -34,6 +34,7 @@ root=${CLAUDE_PLUGIN_OPTION_WORK_ROOT:-}
 [ -n "$group" ] && echo "Group storage: /cluster/project/$group, /cluster/work/$group."
 [ -n "$root" ] && echo "Work root: $root."
 [ -n "${CLAUDE_PLUGIN_OPTION_NOTES:-}" ] && echo "User's notes: $CLAUDE_PLUGIN_OPTION_NOTES"
+[ -n "${CLAUDE_PLUGIN_OPTION_TRANSFER:-}" ] && echo "Data transfer: $CLAUDE_PLUGIN_OPTION_TRANSFER"
 
 echo
 cat "$(dirname "$0")/session_context.md"

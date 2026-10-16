@@ -1,6 +1,6 @@
 {
   "name": "euler-hpc",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Run coding agents efficiently on ETH Zurich's Euler cluster: the session's node, allocation, storage rules and your own setup at session start; a skill for Slurm jobs, software and data; `euler-jobs`, an overview of your sessions with their jobs and PRs for you and your agents; and `euler-step`, which runs a command in an allocation you hold.",
   "author": {
     "name": "quadbio"
@@ -35,6 +35,11 @@
       "type": "string",
       "title": "Notes for the agent",
       "description": "Facts about your own Euler setup, on one line, separated by semicolons, e.g. where shared datasets live. Blank: none."
+    },
+    "transfer": {
+      "type": "string",
+      "title": "Data transfer",
+      "description": "How your data reaches Euler, on one line, separated by semicolons: the machines it lives on and whether Euler can reach them, Globus collections with their IDs and path roots. Blank: none."
     }
   }
 }

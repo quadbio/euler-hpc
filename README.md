@@ -42,6 +42,7 @@ shell install doesn't). They hold what is specific to you on Euler, so your `CLA
 | `group` | | Your group's storage name, as in `/cluster/project/<group>`. |
 | `work_root` | | Where your repositories and work live. |
 | `notes` | | Other facts about your setup, separated by semicolons, e.g. where shared datasets live. |
+| `transfer` | | How your data reaches Euler: the machines it lives on, whether Euler can reach them, Globus collections and their path roots. |
 
 Slurm charges your default share. If you belong to several, set `SBATCH_ACCOUNT`, `SALLOC_ACCOUNT` and
 `SLURM_ACCOUNT` in your shell profile.
