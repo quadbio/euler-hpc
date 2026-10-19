@@ -1,5 +1,5 @@
 #!/bin/bash
-# Euler Slurm job template (euler-hpc skill). Copy, fill <…>, then:  mkdir -p logs && sbatch --parsable job.sh
+# Euler Slurm job template (euler-hpc:jobs skill). Copy, fill <…>, then:  mkdir -p logs && sbatch --parsable job.sh
 # Reference: https://docs.hpc.ethz.ch/batchsystem/slurm/
 
 #SBATCH --job-name=<jobname>

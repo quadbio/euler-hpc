@@ -1,6 +1,6 @@
 This session runs on Euler, ETH Zurich's HPC cluster. The docs at https://docs.hpc.ethz.ch are the authority; each
-rule names its page there. Load the `euler-hpc` skill before running work that needs more than this session holds,
-submitting jobs, installing software or moving data in bulk. Always:
+rule names its page there. Load the `euler-hpc:jobs` skill before running work that needs more than this session
+holds, submitting jobs or installing software, and `euler-hpc:data` before moving data in bulk. Always:
 
 1. Login nodes (`eu-login-*`) are for git, downloads and light work only, never computation. Compute nodes are
    firewalled: `module load eth_proxy` before anything that needs the internet. (`/connections/firewall/`)
