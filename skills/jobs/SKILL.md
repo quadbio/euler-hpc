@@ -1,15 +1,15 @@
 ---
-name: euler-hpc
+name: jobs
 description: >-
   Run work on ETH Zurich's Euler cluster efficiently: Slurm batch jobs, job arrays, GPU jobs, interactive
   allocations and the submit → monitor → logs loop, which session submitted which job, installing software and
-  Python environments, containers, moving data in and out. Trigger on "run this on the cluster", "submit a job",
-  "sbatch this", "run on a GPU", "run this for every sample", "hold a node", "is my job done?", "why did my job
-  fail?", "which session started this job?", "install X on Euler", "copy this to/from Euler". The rules for every
-  session (node, allocation, storage, snapshots, cancelling) come from this plugin's session-start context.
+  Python environments, containers. Trigger on "run this on the cluster", "submit a job", "sbatch this", "run on a
+  GPU", "run this for every sample", "hold a node", "is my job done?", "why did my job fail?", "which session
+  started this job?", "install X on Euler". The rules for every session (node, allocation, storage, snapshots,
+  cancelling) come from this plugin's session-start context.
 ---
 
-# Euler HPC
+# Running work on Euler
 
 How to run work on Euler. The session-start context holds the rules for every session; if it is missing, read
 `${CLAUDE_PLUGIN_ROOT}/hooks/session_context.md`. Docs paths below are relative to https://docs.hpc.ethz.ch; read
@@ -220,26 +220,6 @@ node and from its resources. For a new allocation, use `salloc` or `sbatch`.
   file quota. (`/software/package-managers/conda/`)
 - **Containers:** Apptainer needs access (`get-access`); point `APPTAINER_CACHEDIR` at scratch; images can't be
   built on Euler; `--nv` for GPUs. (`/software/apptainer/`)
-
-## Moving data
-
-- `rsync` to or from `euler.ethz.ch` (login nodes); tar many small files first. `rclone` for Polybox on login
-  nodes (`/connections/polybox/`); ask support before terabytes.
-- Globus for large transfers (`/services/globus/`), from the shell with `globus-cli` (`uv tool install
-  globus-cli`; on a compute node, `module load eth_proxy` first):
-  - Euler's collections are `ETH Zurich#Euler Project`, `ETH Zurich#Euler Work` and `ETH Zurich#Euler Scratch`;
-    `globus api transfer GET /endpoint_search -Q filter_fulltext=Euler` shows the current set. Paths are relative
-    to the filesystem the collection's description names: `/cluster/project/<group>/x` is `/<group>/x` in Project.
-  - Logging in needs the human: run `globus login --no-local-server` where they can type, e.g. a tmux window;
-    they open the URL and paste the code there themselves. Each mapped collection also needs one
-    `globus session consent` for its `data_access` scope; one consent can bundle several collections.
-  - `globus endpoint search` and `globus ls` can take minutes; `globus api transfer GET
-    /operation/endpoint/<id>/ls -Q path=<path>` answers in under a minute.
-  - `globus transfer --batch` takes one source and destination pair per line; `--dry-run` prints the task
-    without submitting it. The docs recommend keeping checksum verification, encrypting up to a few TB, and
-    failing on quota errors when uploading.
-- A directory named `nobackup` is left out of backups. Don't process data in batch jobs directly from external
-  storage. (`/hardware/storage/`)
 
 ## What the human runs
 

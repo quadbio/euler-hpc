@@ -3,13 +3,14 @@
 A Claude Code plugin for running coding agents efficiently on [Euler](https://docs.hpc.ethz.ch/), ETH Zurich's
 HPC cluster. It holds everything specific to the cluster, so other plugins can stay cluster-agnostic: at session
 start it tells the agent which node it is on, what its allocation holds, your own setup and the rules for every
-session; its skill covers Slurm jobs, software and data, summarising the docs and pointing to their pages; and it
-links each job to the Claude session that submitted it.
+session; its skills cover Slurm jobs and software, and moving data, summarising the docs and pointing to their
+pages; and it links each job to the Claude session that submitted it.
 
 | Part | What it does |
 | --- | --- |
 | `hooks/` | On Euler only, at session start: node and allocation, your settings, always-on rules (nodes, inline vs Slurm, modules, storage, snapshots, cancelling). |
-| `skills/euler-hpc/` | Slurm batch jobs, GPU jobs, arrays, interactive allocations, monitoring and failures; software, containers, moving data. An sbatch template. Loaded on demand. |
+| `skills/jobs/` | Slurm batch jobs, GPU jobs, arrays, interactive allocations, monitoring and failures; software and containers. An sbatch template. Loaded on demand. |
+| `skills/data/` | Moving data in and out: rsync, Polybox, Globus from the shell. Loaded on demand. |
 | `bin/euler-jobs` | `euler-jobs`: your Claude sessions on Euler, each with its tmux window, status, background commands, PRs and jobs; what needs you on top, and what the allocation they share uses now. For you and your agents. |
 | `bin/euler-step` | `euler-step <job> <command>`: runs a command in an allocation you hold, with all of its CPUs, memory and GPUs. For agents iterating on a node. |
 
