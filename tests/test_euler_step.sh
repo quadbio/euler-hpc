@@ -2,7 +2,7 @@
 # Test bin/euler-step against stub `squeue` and `srun`. Runs on Linux with bash.
 set -eu
 
-step_cmd="$(cd "$(dirname "$0")/.." && pwd)/bin/euler-step"
+step_cmd="$(CDPATH='' cd "$(dirname "$0")/.." && pwd)/bin/euler-step"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin" "$tmp/shared" "$tmp/local"

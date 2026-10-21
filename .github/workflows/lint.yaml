@@ -20,6 +20,8 @@ jobs:
       - uses: pre-commit/action@v3.0.1
       - run: sh tests/test_euler_jobs.sh
       - run: sh tests/test_euler_step.sh
+      - run: sh tests/test_euler_caps.sh
       - uses: astral-sh/setup-uv@v6
       - run: uvx --from . euler-jobs --help | grep -q "^Your Slurm jobs"  # installs as the README says
       - run: 'uvx --from . euler-step --help | grep -q "^usage: euler-step"'
+      - run: 'uvx --from . euler-caps --help | grep -q "^usage: euler-caps"'

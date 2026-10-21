@@ -26,8 +26,8 @@ Start from `assets/euler_job.sh`. Euler-specific Slurm rules:
 
 - **No `--partition`.** Slurm auto-selects it from your `--time` / `--gpus` / `--gres`.
 - **`--time`** defaults to **1 h** if unset, and it *also selects the time-windowed partition* — so right-size
-  it. Over-asking pushes you to a longer-queue partition (more wait); multi-day is allowed but the max is
-  account-dependent.
+  it. Over-asking pushes you to a longer-queue partition (more wait), whose per-user caps are also smaller;
+  multi-day is allowed but the max is account-dependent.
 - **Memory: `--mem-per-cpu` only.** Euler rejects `--mem`.
 - **Threads:** one multithreaded process = `--ntasks=1 --cpus-per-task=N`. Euler sets `OMP_NUM_THREADS=N` only
   if the submitting shell has none, and a session inside a job has its own job's; so set
@@ -51,7 +51,9 @@ Start from `assets/euler_job.sh`. Euler-specific Slurm rules:
   doesn't source `~/.bashrc`. If the manager isn't on `PATH` where you submit, or you pass `--export=NONE`, use its
   absolute path (`command -v pixi`).
 - **In-job internet:** add `module load eth_proxy` only if the job downloads or talks to an online service.
-  Python `aiohttp` ignores the proxy unless its session is created with `trust_env=True`.
+  Python `aiohttp` ignores the proxy unless its session is created with `trust_env=True`. W&B can't log online
+  even then (`eth_proxy` puts `api.wandb.ai` in `no_proxy`): set `WANDB_MODE=offline` and `wandb sync` from a
+  login node afterwards.
 - **Heavy many-small-file I/O:** stage to node-local **`$TMPDIR`** (request size with `--tmp=<size>`), compute
   there, copy results back — don't hammer shared storage.
 
@@ -88,7 +90,10 @@ pixi run python scripts/run_me.py     # runs in the submit directory
   24 KB → effectively no floor, and you silently land on a small card).
 - **Models / VRAM** (docs: https://docs.hpc.ethz.ch/hardware/gpu_nodes/): `rtx_2080` 11g · `rtx_3090` /
   `rtx_4090` / `rtx_6000` / `nvidia_titan_rtx` 24g · `a100` 40g · `a100_80gb` 80g · `pro_6000` 96g. Slurm routes
-  to the partition that has the model you asked for.
+  to the partition that has the model you asked for. bf16 and flash-attention need Ampere or newer (`rtx_3090`,
+  `rtx_4090`, `a100*`, `pro_6000`), not the Turing `rtx_2080`, `rtx_6000` and `nvidia_titan_rtx`; `pro_6000`
+  needs a torch build for CUDA ≥ 12.8. To check the card you got, print
+  `nvidia-smi --query-gpu=name,memory.total --format=csv` at the top of the job's log.
 - **Which queue is shorter:** submit to the default model; if the job is still pending after about 5 minutes,
   cancel it and resubmit on the fallback. `sbatch --test-only` and `squeue --start` can't tell: they assume
   running jobs use their whole time limit, and `--test-only` ignores jobs queued ahead.
@@ -128,8 +133,12 @@ echo "submitted $JOBID"
   `PENDING`/`RUNNING`. Cancel with `scancel "$JOBID"`.
 - **Check early, unasked:** once the expensive step should have started, read the log for progress and warnings
   (OOM, NCCL) and check GPU use. A smoke test on one GPU doesn't cover a run on several.
-- **Right-size the next run:** compare `MaxRSS` and `Elapsed` with what you asked for;
-  `get_inefficient_jobs --for-last-hours 24` lists your jobs that wasted CPU, RAM or GPU.
+- **Right-size the next run:** RAM about 1.3 × the `MaxRSS` of an earlier run of the same job (on its `.batch`
+  step, blank with `sacct -X`), `--time` from its `Elapsed`; `get_inefficient_jobs --for-last-hours 24` lists
+  your jobs that wasted CPU, RAM or GPU. Billing follows requested RAM on every partition, so over-asking costs the
+  group fair-share priority.
+- **Per-user caps:** each QOS (`<group>/<partition>/<tier>`) caps the GPUs, CPUs and RAM one user runs at once,
+  shared by all your sessions. Before an array or sweep, run `euler-caps`: the caps next to what your jobs use now.
 
 ## When a job fails — symptom → cause → fix
 
@@ -147,6 +156,7 @@ success). `MaxRSS` is in KB unless suffixed.
 | network hang/timeout on download | no `eth_proxy` | `module load eth_proxy` |
 | `CANCELLED` right at start, no output | job startup took over 120 s, e.g. a slow `~/.bashrc` (conda init on work storage) | slim the shell startup (`/news/2026-01-12-slurm-upgrade/`) |
 | GPU job never schedules | model/VRAM your share can't provide | another model; check `my_share_info` |
+| `PENDING (QOSMaxMemoryPerUser)` or another `QOSMax…PerUser…` | a per-user cap is full, shared by all your jobs | `euler-caps`; wait, or shrink: `scontrol update JobId=<id> MinMemoryCPU=<MB>` |
 
 ## Job arrays (parallel, one task per item)
 
@@ -237,7 +247,7 @@ node and from its resources. For a new allocation, use `salloc` or `sbatch`.
 - `mkdir -p logs && JOBID=$(sbatch --parsable job.sh)`; poll `euler-jobs --mine`/`sacct`/`sstat`, never
   `tail -f`. Cancel only this session's jobs.
 - Job names carry the task (`-J <task>-…`); paths come in at submit, not hardcoded; run scripts the project's way.
-- Parallel per-item work: `--array=0-N%K` (ask the user for `K`) + `$SLURM_ARRAY_TASK_ID` +
+- Parallel per-item work: `--array=0-N%K` (ask the user for `K`; `euler-caps` first) + `$SLURM_ARRAY_TASK_ID` +
   `--output=…%A_%a.out` (or the project's sweep launcher).
 - Iterating on a node: `salloc --no-shell -J <task>-…`, then `euler-step <task>-… <command>`; `scancel` when done.
 - Inside a job: plain `srun` is a step of this job; new allocations via `salloc`/`sbatch`.
