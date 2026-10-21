@@ -3,7 +3,7 @@
 # session in Claude Code's session registry, and a transcript. Runs on Linux with python3 and bash.
 set -eu
 
-jobs_cmd="$(cd "$(dirname "$0")/.." && pwd)/bin/euler-jobs"
+jobs_cmd="$(CDPATH='' cd "$(dirname "$0")/.." && pwd)/bin/euler-jobs"
 tmp=$(mktemp -d)
 stop() { for p in $(pgrep -P "$1"); do stop "$p"; done; kill "$1" 2>/dev/null || true; }
 claude="" idle=""

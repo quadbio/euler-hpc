@@ -1,0 +1,95 @@
+#!/bin/bash
+# Per-user caps on running jobs (QOS MaxTRESPerUser), next to what your jobs use against them, per QOS.
+# A job's QOS is the cap row's name (<group>/<partition>/<tier>); its account (<partition>/<group>) isn't.
+# Caps change without notice, so read them here instead of copying them anywhere.
+set -euo pipefail
+
+usage="usage: euler-caps [--all] [group...]
+Per-user caps on running jobs, shared by all your jobs and sessions, next to what your running jobs use now and
+how many pending ones a cap holds (QOSMax...PerUser). Default: GPU partitions and normal, and any QOS you have
+jobs in; --all: every partition. Default groups: your shareholder groups, not public."
+
+parts='gpu|gpuhe|gpupr|cuda13pr|normal'
+grp=()
+for a in "$@"; do
+	case $a in
+	-h | --help)
+		echo "$usage"
+		exit 0
+		;;
+	--all) parts='[^/]+' ;;
+	-*)
+		echo "$usage" >&2
+		exit 2
+		;;
+	*) grp+=("$a") ;;
+	esac
+done
+if ! command -v sacctmgr >/dev/null; then
+	echo "euler-caps: no Slurm on $(hostname); run it on Euler, or pipe it there:" \
+		"ssh <euler host> 'bash -s' < \"\$(command -v euler-caps)\"" >&2
+	exit 1
+fi
+fail() {
+	echo "euler-caps: $1 failed, so caps or usage would be wrong" >&2
+	exit 1
+}
+# Accounts come as gpu/es_x, %gpu/es_x or es_x: the group is the last part
+if [ ${#grp[@]} -eq 0 ]; then
+	accounts=$(sacctmgr -nP show assoc user="$USER" format=account) || fail "sacctmgr show assoc"
+	while read -r g; do [ -n "$g" ] && grp+=("$g"); done < <(sed 's/^%//; s/.*\///' <<<"$accounts" |
+		grep -vx public | sort -u)
+fi
+if [ ${#grp[@]} -eq 0 ]; then
+	echo "euler-caps: no shareholder group found for $USER; name one: euler-caps <group>" >&2
+	exit 1
+fi
+caps=$(sacctmgr -nP show qos format=name,maxtrespu) || fail "sacctmgr show qos"
+# -r: one row per array task, not one per pending array; width 0: fields untruncated
+jobs=$(squeue --me -h -r -O "qos:0|,tres-alloc:0|,statecompact:0|,reason:0|") || fail squeue
+
+rows=$({
+	awk '{ print "C|" $0 }' <<<"$caps"
+	awk '{ print "J|" $0 }' <<<"$jobs"
+} | awk -F'|' -v groups="${grp[*]}" -v parts="^($parts)$" '
+	BEGIN { k = split(groups, a, " "); for (i = 1; i <= k; i++) mine[a[i]] = 1 }
+	function tres(s, k, a, i, n) {
+		n = split(s, a, ",")
+		for (i = 1; i <= n; i++) if (index(a[i], k "=") == 1) return substr(a[i], length(k) + 2)
+		return ""
+	}
+	function gb(v, u) {
+		u = substr(v, length(v))
+		return u == "T" ? v * 1024 : u == "M" ? v / 1024 : u == "K" ? v / 1048576 : v + 0
+	}
+	function cell(used, cap) { return cap == "" ? used : used "/" cap }
+	{ split($2, p, "/"); if (!(p[1] in mine)) next; q = $2 }
+	$1 == "C" && $3 != "" {
+		if (p[2] ~ parts) show[q] = 1
+		cg[q] = tres($3, "gres/gpu"); cc[q] = tres($3, "cpu"); cm[q] = tres($3, "mem")
+	}
+	$1 == "J" {
+		show[q] = 1
+		if ($4 == "R") { n[q]++; ug[q] += tres($3, "gres/gpu"); uc[q] += tres($3, "cpu"); um[q] += gb(tres($3, "mem")) }
+		else if ($4 == "PD" && $5 ~ /^QOSMax.*PerUser/) held[q]++
+	}
+	END {
+		for (q in show) {
+			k = split(q, p, "/"); tier = k > 2 ? p[3] : "-"
+			rank = tier ~ /^[0-9]+$/ ? tier : tier == "bulk" ? 1000 : 2000
+			printf "%s\t%d\t%-26s %-5s %4d %9s %11s %15s %4d\n", p[2], rank, q, tier ~ /^[0-9]+$/ ? tier "h" : tier,
+				n[q], cell(ug[q] + 0, cg[q]), cell(uc[q] + 0, cc[q]), cell(sprintf("%.0fG", um[q]), cm[q]), held[q]
+		}
+	}' | sort -t "$(printf '\t')" -k1,1 -k2,2n | cut -f3-)
+
+if [ -z "$rows" ]; then
+	echo "euler-caps: no per-user caps found for ${grp[*]}" >&2
+	exit 1
+fi
+echo "Per-user caps on running jobs, shared by all your jobs and sessions: used now / cap."
+printf '%-26s %-5s %4s %9s %11s %15s %4s\n' QOS tier jobs GPUs CPUs RAM held
+echo "$rows"
+if awk '$NF > 0 { f = 1 } END { exit !f }' <<<"$rows"; then
+	echo "Held: pending jobs a per-user cap keeps waiting (QOSMax...PerUser). They start as your running jobs in that"
+	echo "QOS end; or shrink one: scontrol update JobId=<id> MinMemoryCPU=<MB>."
+fi

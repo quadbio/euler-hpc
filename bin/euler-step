@@ -45,8 +45,8 @@ if [ "$nodes" -ne 1 ]; then
 fi
 echo "euler-step: job $id on $node, $cpus CPUs, $left left" >&2
 
-mapfile -t outer < <(compgen -v SLURM_)
-unset OMP_NUM_THREADS "${outer[@]}"
+unset OMP_NUM_THREADS
+for v in $(compgen -v SLURM_); do unset "$v"; done
 # Euler's cli_filter sets -c 1 before srun reads -c, so srun warns that the step may never run; it runs
 exec srun --jobid="$id" --overlap -n1 -c"$cpus" --mem-per-cpu=0 "$@" \
 	2> >(grep -v --line-buffered "cpus-per-task value exceeds that of job" >&2)
