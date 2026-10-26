@@ -2,8 +2,9 @@
 """Reopen the Claude Code sessions that were open when your last Euler job ended, each in a window of its tmux session.
 
 Claude Code's session registry keeps the entry of each session that was still open when its job was killed, with the
-tmux window it ran in; the sessions open last are those on the machine whose entry changed last. Each one reopens
-with `claude --resume` in a new window of the tmux session it ran in. Standard library only.
+tmux window it ran in; the sessions open last are those on the machine whose entry changed last before the current
+Slurm job started, on the same node or another. Each one reopens with `claude --resume` in a new window of the tmux
+session it ran in. Standard library only.
 """
 
 import argparse
@@ -22,8 +23,9 @@ _loader.exec_module(jobs)
 
 
 def last_open() -> list[dict]:
-    """The sessions open on the other machine whose registry entry changed last, in their tmux windows' order."""
-    closed = [e for e in jobs.registry().values() if not e["alive"] and not e["local"]]
+    """The sessions open on the machine whose registry entry changed last before this job, in their windows' order."""
+    start = float(os.environ.get("SLURM_JOB_START_TIME") or time.time()) * 1000
+    closed = [e for e in jobs.registry().values() if not e["alive"] and e.get("updatedAt", 0) < start]
     if not closed:
         return []
     machine = max(closed, key=lambda e: e.get("updatedAt", 0)).get("pidDomain")

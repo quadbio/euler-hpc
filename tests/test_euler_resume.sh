@@ -1,6 +1,7 @@
 #!/bin/sh
 # Test bin/euler-resume against a stub `tmux` and Claude Code's session registry: a live session, an older job's
-# sessions, and the last job's sessions in two tmux sessions, outside tmux and in a directory that is gone.
+# sessions, the last job's sessions on this same node in two tmux sessions, outside tmux and in a directory that is
+# gone, and a session that ended in the current job.
 set -eu
 
 resume_cmd="$(cd "$(dirname "$0")/.." && pwd)/bin/euler-resume"
@@ -28,15 +29,16 @@ sleep 3600 &
 live=$!
 printf '{"pid": %s, "procStart": "%s", "pidDomain": "linux:%s:pid:[1]", "sessionId": "live-0", "cwd": "%s", "updatedAt": %s}\n' \
 	"$live" "$(awk '{print $22}' "/proc/$live/stat")" "$machine" "$tmp/repo" "$now" >"$tmp/claude/sessions/0.json"
-entry 1 live-0 last "work:@4.%4" resumed "$tmp/repo" 70  # reopened here since: not offered again
+entry 1 live-0 "$machine" "work:@4.%4" resumed "$tmp/repo" 70  # reopened here since: not offered again
 entry 2 old-1 before "work:@1.%1" older "$tmp/repo" 20000
-entry 3 a-1 last "work:@3.%3" a-name "$tmp/repo/.claude/worktrees/tree" 60
-entry 4 b-2 last "work:@1.%1" b-name "$tmp/repo" 90
-entry 5 c-3 last "main:@2.%2" c-name "$tmp/repo" 80
-entry 6 d-4 last "" d-name "$tmp/repo" 100
-entry 7 e-5 last "work:@5.%5" e-name "$tmp/gone" 100
+entry 3 a-1 "$machine" "work:@3.%3" a-name "$tmp/repo/.claude/worktrees/tree" 60
+entry 4 b-2 "$machine" "work:@1.%1" b-name "$tmp/repo" 90
+entry 5 c-3 "$machine" "main:@2.%2" c-name "$tmp/repo" 80
+entry 6 d-4 "$machine" "" d-name "$tmp/repo" 100
+entry 7 e-5 "$machine" "work:@5.%5" e-name "$tmp/gone" 100
+entry 8 f-6 "$machine" "main:@9.%9" crashed "$tmp/repo" 10  # ended in this job
 
-run() { : >"$tmp/tmux.log"; env -u TMUX HOME="$tmp" CLAUDE_CONFIG_DIR="$tmp/claude" PATH="$tmp/bin:$PATH" python3 "$resume_cmd"; }
+run() { : >"$tmp/tmux.log"; env -u TMUX SLURM_JOB_START_TIME=$((now / 1000 - 1800)) HOME="$tmp" CLAUDE_CONFIG_DIR="$tmp/claude" PATH="$tmp/bin:$PATH" python3 "$resume_cmd"; }
 fail() { echo "FAIL: $1"; printf '%s\n' "$out"; cat "$tmp/tmux.log"; exit 1; }
 has() { printf '%s\n' "$out" | grep -q -- "$1"; }
 called() { grep -qx -- "$1" "$tmp/tmux.log"; }
@@ -51,7 +53,7 @@ main
 revived
    4  d-name                   repo"
 [ "$(printf '%s\n' "$out" | sed '1d;$d')" = "$expected" ] || fail "list by tmux session and window"
-! has "older\|resumed" || fail "an older job's session, or one open again"
+! has "older\|resumed\|crashed" || fail "an older job's session, one open again or one from this job"
 [ ! -s "$tmp/tmux.log" ] || fail "no answer opens nothing"
 
 out=$(echo "2-4" | run)
