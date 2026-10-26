@@ -13,6 +13,7 @@ pages; and it links each job to the Claude session that submitted it.
 | `skills/data/` | Moving data in and out: rsync, Polybox, Globus from the shell. Loaded on demand. |
 | `bin/euler-jobs` | `euler-jobs`: your Claude sessions on Euler, each with its tmux window, status, background commands, PRs and jobs; what needs you on top, and what the allocation they share uses now. For you and your agents. |
 | `bin/euler-step` | `euler-step <job> <command>`: runs a command in an allocation you hold, with all of its CPUs, memory and GPUs. For agents iterating on a node. |
+| `bin/euler-resume` | `euler-resume`: after your Euler job ends, reopens the Claude sessions that were still open, each with `claude --resume` in a window of the tmux session it ran in; you pick which. For you, in a new job. |
 
 Not affiliated with ETH Zurich; the [Euler docs](https://docs.hpc.ethz.ch/) are the reference.
 
@@ -53,7 +54,7 @@ Slurm charges your default share. If you belong to several, set `SBATCH_ACCOUNT`
 Once, on Euler (all nodes share your home), from the
 [quadbio marketplace](https://github.com/quadbio/claude-plugins); then save the settings above.
 
-`euler-jobs` and `euler-step` are on the `PATH` of Claude sessions. For your own shell:
+`euler-jobs`, `euler-step` and `euler-resume` are on the `PATH` of Claude sessions. For your own shell:
 `uv tool install git+https://github.com/quadbio/euler-hpc`, updated with `uv tool upgrade euler-hpc`; that copy then
 comes first in Claude sessions too.
 
@@ -66,6 +67,7 @@ pre-commit run --all-files
 sh tests/test_session_start.sh   # on Euler
 sh tests/test_euler_jobs.sh
 sh tests/test_euler_step.sh
+sh tests/test_euler_resume.sh
 ```
 
 ## Release
