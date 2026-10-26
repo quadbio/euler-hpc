@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+"""Reopen the Claude Code sessions that were open when your last Euler job ended, each in a window of its tmux session.
+
+Claude Code's session registry keeps the entry of each session that was still open when its job was killed, with the
+tmux window it ran in; the sessions open last are those on the machine whose entry changed last. Each one reopens
+with `claude --resume` in a new window of the tmux session it ran in. Standard library only.
+"""
+
+import argparse
+import os
+import re
+import subprocess
+import time
+from importlib.machinery import SourceFileLoader
+from importlib.util import module_from_spec, spec_from_loader
+from pathlib import Path
+
+# The registry reader lives in euler-jobs, installed next to this script
+_loader = SourceFileLoader("euler_jobs", str(Path(__file__).resolve().with_name("euler-jobs")))
+jobs = module_from_spec(spec_from_loader(_loader.name, _loader))
+_loader.exec_module(jobs)
+
+
+def last_open() -> list[dict]:
+    """The sessions open on the other machine whose registry entry changed last, in their tmux windows' order."""
+    closed = [e for e in jobs.registry().values() if not e["alive"] and not e["local"]]
+    if not closed:
+        return []
+    machine = max(closed, key=lambda e: e.get("updatedAt", 0)).get("pidDomain")
+    found = [e for e in closed if e.get("pidDomain") == machine]
+    for e in found:
+        session, _, window = e.get("tmux", "").partition(":")
+        e["tmux_session"] = session or "revived"
+        e["window"] = int(m.group(1)) if (m := re.match(r"@(\d+)", window)) else 1 << 30
+    first = {}
+    for e in sorted(found, key=lambda e: e["window"]):
+        first.setdefault(e["tmux_session"], e["window"])
+    return sorted(found, key=lambda e: (first[e["tmux_session"]], e["window"]))
+
+
+def picked(answer: str, count: int) -> list[int]:
+    """1-based numbers and ranges such as `1 3-5`, as 0-based indices; Enter for all."""
+    if not answer.strip():
+        return list(range(count))
+    out = []
+    for part in answer.replace(",", " ").split():
+        lo, _, hi = part.partition("-")
+        if not lo.isdigit() or (hi and not hi.isdigit()):
+            raise ValueError(part)
+        out += range(int(lo) - 1, int(hi or lo))
+    if any(not 0 <= i < count for i in out):
+        raise ValueError(answer)
+    return list(dict.fromkeys(out))
+
+
+def tmux(*args: str) -> str:
+    done = subprocess.run(["tmux", *args], capture_output=True, text=True)
+    if done.returncode:
+        raise SystemExit(f"euler-resume: tmux {args[0]}: {done.stderr.strip()}")
+    return done.stdout.strip()
+
+
+def reopen(entry: dict) -> None:
+    session, name = entry["tmux_session"], entry.get("name") or entry["sessionId"][:8]
+    exists = subprocess.run(["tmux", "has-session", "-t", f"={session}"], capture_output=True).returncode == 0
+    new = ["new-window", "-d", "-t", f"={session}:"] if exists else ["new-session", "-d", "-s", session]
+    window = tmux(*new, "-n", name, "-c", entry["cwd"], "-P", "-F", "#{window_id}")
+    tmux("send-keys", "-t", window, f"claude --resume {entry['sessionId']}", "Enter")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
+    parser.parse_args()
+    found = last_open()
+    if not found:
+        print("No sessions were open when your last job ended.")
+        return
+    when = time.strftime("%a %d %b %H:%M", time.localtime(max(e.get("updatedAt", 0) for e in found) / 1000))
+    print(f"Open when your last job ended (last active {when}):")
+    ready, session = [], None
+    for e in found:
+        if e["tmux_session"] != session:
+            session = e["tmux_session"]
+            print(session)
+        if os.path.isdir(e.get("cwd", "")):
+            ready.append(e)
+            print(f"  {len(ready):>2}  {e.get('name', ''):<24} {jobs.where(e['cwd'])}")
+        else:
+            print(f"   -  {e.get('name', ''):<24} {jobs.where(e.get('cwd', ''))} (directory gone)")
+    if not ready:
+        return
+    try:
+        answer = input("Resume which? Enter for all, numbers like 1 3-5, q for none: ")
+    except EOFError:
+        return
+    if answer.strip().lower() == "q":
+        return
+    try:
+        chosen = [ready[i] for i in picked(answer, len(ready))]
+    except ValueError as err:
+        parser.error(f"not a session number: {err}")
+    for e in chosen:
+        reopen(e)
+    sessions = list(dict.fromkeys(e["tmux_session"] for e in chosen))
+    hint = "" if os.environ.get("TMUX") else f"; tmux attach -t {sessions[0]}"
+    print(f"Resumed {len(chosen)} in tmux {', '.join(sessions)}{hint}")
+
+
+if __name__ == "__main__":
+    main()
