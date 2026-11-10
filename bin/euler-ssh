@@ -54,8 +54,7 @@ held() {
 	p=$(cat "$1/pid" 2>/dev/null) && kill -0 "$p" 2>/dev/null
 }
 lock=
-release() { if [ -n "$lock" ]; then rm -rf "$lock"; fi; }
-trap release EXIT
+trap '[ -z "$lock" ] || rm -rf "$lock"' EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM

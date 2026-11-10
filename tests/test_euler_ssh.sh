@@ -1,5 +1,6 @@
 #!/bin/sh
 # Test bin/euler-ssh against a stub `ssh` that runs the "remote" command locally. Linux and macOS.
+# shellcheck disable=SC2016  # commands for "Euler" are single-quoted on purpose
 set -eu
 
 es="$(CDPATH='' cd "$(dirname "$0")/.." && pwd)/bin/euler-ssh"
