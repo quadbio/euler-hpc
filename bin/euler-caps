@@ -25,9 +25,9 @@ for a in "$@"; do
 	*) grp+=("$a") ;;
 	esac
 done
-if ! command -v sacctmgr >/dev/null; then
-	echo "euler-caps: no Slurm on $(hostname); run it on Euler" >&2
-	exit 1
+# Off Euler: run there through euler-ssh
+if ! command -v sacctmgr >/dev/null && [ -f "$0" ]; then
+	exec "$(dirname "$0")/euler-ssh" --run "$0" "$@"
 fi
 fail() {
 	echo "euler-caps: $1 failed, so caps or usage would be wrong" >&2

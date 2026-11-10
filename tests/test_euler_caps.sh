@@ -96,10 +96,13 @@ has "^usage: euler-caps" || fail "--help"
 out=$(run --all --help) || fail "--help after another option"
 has "^usage: euler-caps" || fail "--help after another option"
 
-# Off Euler, without the stubs: a machine without Slurm says so
+# Off Euler, without the Slurm stubs: it runs itself on Euler through euler-ssh, which needs the Host entry
 if ! command -v sacctmgr >/dev/null 2>&1; then
-	out=$("$caps_cmd" 2>&1) && fail "no Slurm"
-	has "^euler-caps: no Slurm on " || fail "no Slurm message"
+	mkdir "$tmp/nossh"
+	printf '#!/bin/sh\necho "hostname euler-agents"\n' >"$tmp/nossh/ssh"
+	chmod +x "$tmp/nossh/ssh"
+	out=$(PATH="$tmp/nossh:$PATH" "$caps_cmd" 2>&1) && fail "no Slurm"
+	has "^euler-ssh: no 'Host euler-agents'" || fail "forwards to euler-ssh"
 fi
 
 echo "ok"

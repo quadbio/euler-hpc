@@ -14,6 +14,10 @@ if [ $# -lt 2 ]; then
 	echo "$usage" >&2
 	exit 2
 fi
+# Off Euler: run there through euler-ssh, as a step of up to 900 s
+if ! command -v srun >/dev/null && [ -f "$0" ]; then
+	exec "$(dirname "$0")/euler-ssh" -t 900 --run "$0" "$@"
+fi
 job=$1
 shift
 
@@ -46,7 +50,7 @@ fi
 echo "euler-step: job $id on $node, $cpus CPUs, $left left" >&2
 
 unset OMP_NUM_THREADS
-for v in $(compgen -v SLURM_); do unset "$v"; done
+for v in $(compgen -v SLURM_); do [ "$v" = SLURM_CONF ] || unset "$v"; done  # login nodes set SLURM_CONF
 # Euler's cli_filter sets -c 1 before srun reads -c, so srun warns that the step may never run; it runs
 exec srun --jobid="$id" --overlap -n1 -c"$cpus" --mem-per-cpu=0 "$@" \
 	2> >(grep -v --line-buffered "cpus-per-task value exceeds that of job" >&2)

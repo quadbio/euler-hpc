@@ -22,8 +22,18 @@ jobs:
       - run: sh tests/test_euler_step.sh
       - run: sh tests/test_euler_resume.sh
       - run: sh tests/test_euler_caps.sh
+      - run: sh tests/test_euler_ssh.sh
+      - run: sh tests/test_session_start.sh
       - uses: astral-sh/setup-uv@v6
       - run: uvx --from . euler-jobs --help | grep -q "^Your Slurm jobs"  # installs as the README says
       - run: 'uvx --from . euler-step --help | grep -q "^usage: euler-step"'
       - run: 'uvx --from . euler-resume --help | grep -q "^usage: euler-resume"'
       - run: 'uvx --from . euler-caps --help | grep -q "^usage: euler-caps"'
+      - run: 'uvx --from . euler-ssh --help | grep -q "^usage: euler-ssh"'
+  macos:  # what runs off Euler, on macOS's bash 3.2
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: sh tests/test_euler_ssh.sh
+      - run: sh tests/test_euler_caps.sh
+      - run: sh tests/test_session_start.sh

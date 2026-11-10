@@ -16,11 +16,17 @@ import shlex
 import shutil
 import socket
 import subprocess
+import sys
 import textwrap
 import time
 from collections import Counter
 from datetime import date, datetime
 from pathlib import Path
+
+# Off Euler: run there through euler-ssh, before anything the local Python may lack (a Mac's is 3.9); help stays local
+local = __name__ != "__main__" or {"-h", "--help"} & set(sys.argv[1:]) or not os.path.isfile(__file__)
+if not local and not shutil.which("squeue"):
+    os.execv(Path(__file__).with_name("euler-ssh"), ["euler-ssh", "--run", __file__, *sys.argv[1:]])
 
 CLAUDE = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
 FAILED = {"FAILED", "TIMEOUT", "OUT_OF_MEMORY", "NODE_FAIL", "BOOT_FAIL", "DEADLINE", "PREEMPTED"}
@@ -29,7 +35,7 @@ NOW = time.time()
 os.environ["SLURM_TIME_FORMAT"] = "standard"  # the ISO times stamp() reads, whatever the user's shell sets
 
 
-def run(cmd: list[str], env: dict | None = None, timeout: int = 60) -> str:
+def run(cmd: list[str], env: "dict | None" = None, timeout: int = 60) -> str:
     try:
         return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env).stdout
     except (OSError, subprocess.SubprocessError):
@@ -45,7 +51,7 @@ def width() -> int:
     return cols
 
 
-def seconds(text: str) -> int | None:
+def seconds(text: str) -> "int | None":
     """Slurm's [D-]HH:MM:SS or MM:SS; None for UNLIMITED and the like."""
     m = re.fullmatch(r"(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)", text.strip())
     if not m:
@@ -54,7 +60,7 @@ def seconds(text: str) -> int | None:
     return ((d * 24 + h) * 60 + mi) * 60 + s
 
 
-def stamp(text: str) -> float | None:
+def stamp(text: str) -> "float | None":
     """An ISO time, local unless it names its zone; Python 3.10 reads no Z."""
     try:
         return datetime.fromisoformat(re.sub(r"Z$", "+00:00", text.strip())).timestamp()
@@ -105,7 +111,7 @@ def gpus(tres: str) -> str:
     return ""
 
 
-def job_cgroup(job: str) -> Path | None:
+def job_cgroup(job: str) -> "Path | None":
     """This node's cgroup of Slurm job ``job``, beside the job this process runs in; None if there is none."""
     try:
         m = re.match(r"0::/(.*?/)job_\d+/", Path("/proc/self/cgroup").read_text())
@@ -505,6 +511,8 @@ def main() -> None:
 
     def status(sid: str) -> str:
         entry, i = known.get(sid), info[sid]
+        if not entry and sid == own:
+            return "open, on another machine"  # euler-ssh passes its id
         if not entry:
             return f"last active {span(NOW - i['mtime'])} ago" if i.get("mtime") else "no record of this session"
         updated = NOW - entry.get("updatedAt", NOW * 1000) / 1000
@@ -528,7 +536,7 @@ def main() -> None:
     for sid, js in by_session.items():
         who = name(sid)
         entry = known.get(sid, {})
-        closed = entry.get("local", True) and not entry.get("alive")
+        closed = sid != own and entry.get("local", True) and not entry.get("alive")  # the caller is open
         idle = entry.get("alive") and entry.get("status") in ("idle", "shell") and not info[sid]["cmds"]
         idle_since = entry.get("statusUpdatedAt", 0) / 1000
         failed = [
