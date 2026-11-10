@@ -23,6 +23,10 @@ from collections import Counter
 from datetime import date, datetime
 from pathlib import Path
 
+# Off Euler: run there through euler-ssh, before anything the local Python may lack (a Mac's is 3.9)
+if not shutil.which("squeue") and os.path.isfile(__file__):
+    os.execv(Path(__file__).with_name("euler-ssh"), ["euler-ssh", "--run", __file__, *sys.argv[1:]])
+
 CLAUDE = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
 FAILED = {"FAILED", "TIMEOUT", "OUT_OF_MEMORY", "NODE_FAIL", "BOOT_FAIL", "DEADLINE", "PREEMPTED"}
 ENDED = FAILED | {"COMPLETED", "CANCELLED"}
@@ -448,8 +452,6 @@ def main() -> None:
     parser.add_argument("--session", default=os.environ.get("CLAUDE_CODE_SESSION_ID", ""), help="this session's id")
     parser.add_argument("--hours", type=int, default=24, help="how far back to list ended jobs (default 24)")
     args = parser.parse_args()
-    if not shutil.which("squeue") and os.path.isfile(__file__):  # off Euler: run there through euler-ssh
-        os.execv(Path(__file__).with_name("euler-ssh"), ["euler-ssh", "--run", __file__, *sys.argv[1:]])
     own = args.session
 
     since = f"now-{args.hours}hours"
