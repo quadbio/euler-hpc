@@ -105,14 +105,19 @@ case ${1:-} in
 	;;
 esac
 
+# Called as ssh by rsync -e: [ssh options...] euler-agents rsync --server ..., each a separate argument
 rsync=
-args=" $* "
-if [[ $args == *" $host "* ]]; then
-	# Called as ssh by rsync -e: [ssh options...] euler-agents rsync --server ...
-	while [ $# -gt 0 ] && [ "$1" != "$host" ]; do shift; done
-	shift
-	[[ ${1:-} == *rsync ]] || die 2 "after '$host' only rsync is supported; run commands as euler-ssh 'command'"
-	rsync=1
+if [ "${1:-}" != --run ]; then
+	for ((i = 1; i + 2 <= $#; i++)); do
+		j=$((i + 1)) k=$((i + 2))
+		if [ "${!i}" = "$host" ] && [[ ${!j} == *rsync ]] && [ "${!k}" = --server ]; then
+			rsync=$i
+			break
+		fi
+	done
+fi
+if [ -n "$rsync" ]; then
+	shift "$rsync"
 	t=$maxt
 fi
 if [ -z "$rsync" ] && [ "${1:-}" = -t ]; then

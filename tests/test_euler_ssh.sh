@@ -85,7 +85,10 @@ out=$(run --run "$tmp/plain.sh") && fail "--run without #!"
 out=$(run -l me euler-agents rsync --server -logDtpre.iLsfxCIvu . /cluster/scratch/x/) || fail "rsync -e"
 grep -q "^timeout -k 10 900 rsync --server -logDtpre.iLsfxCIvu \. /cluster/scratch/x/$" "$tmp/bin/ssh.log.rsync" ||
 	fail "rsync gets 900 s and its own arguments"
-out=$(run euler-agents ls) && fail "only rsync after the alias"
+out=$(run 'echo euler-agents rsync --server') || fail "the alias inside a command"
+has "^euler-agents rsync --server$" || fail "the alias inside a command isn't rsync"
+out=$(run --run "$tmp/script.sh" euler-agents rsync --server) || fail "the alias as a script argument"
+has "^n=3 first=euler-agents$" || fail "the alias as a script argument isn't rsync"
 
 start=$(date +%s)
 out=$(STUB_REFUSE=1 run 'echo after refusal') || fail "retry on refusal"
