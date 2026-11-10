@@ -4,7 +4,7 @@
 # gone, and a session that ended in the current job.
 set -eu
 
-resume_cmd="$(cd "$(dirname "$0")/.." && pwd)/bin/euler-resume"
+resume_cmd="$(CDPATH='' cd "$(dirname "$0")/.." && pwd)/bin/euler-resume"
 tmp=$(mktemp -d)
 live=""
 trap 'kill $live 2>/dev/null || true; rm -rf "$tmp"' EXIT

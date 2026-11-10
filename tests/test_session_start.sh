@@ -2,7 +2,7 @@
 # Test hooks/session_start.sh against a stub `hostname`. Runs on Euler: the hook checks /cluster/home.
 set -eu
 
-hook="$(cd "$(dirname "$0")/.." && pwd)/hooks/session_start.sh"
+hook="$(CDPATH='' cd "$(dirname "$0")/.." && pwd)/hooks/session_start.sh"
 [ -d /cluster/home ] || { echo "skip: not on Euler"; exit 0; }
 
 tmp=$(mktemp -d)
