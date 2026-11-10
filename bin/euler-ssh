@@ -1,0 +1,171 @@
+#!/bin/bash
+# Run commands on Euler from another machine, through the shared connection of `Host euler-agents` in ~/.ssh/config.
+# Euler refuses more than 10 sessions per connection, for every session on the machine, and a killed local ssh
+# leaves its remote command running and holding one. So at most 6 calls run at once and the rest queue, refused
+# sessions are retried, and every command runs under `timeout` on Euler. Linux and macOS (bash 3.2).
+set -o pipefail
+
+usage="usage: euler-ssh [-t SECONDS] 'command'          run a command on Euler (a login node), 120 s by default, at most 900
+       euler-ssh [-t SECONDS] --run SCRIPT [args...]   run a local script there; its shebang picks the interpreter
+       rsync -e euler-ssh ... euler-agents:PATH ...    copy files, at most 900 s
+       euler-ssh --reconnect [--force]                 for you, in a terminal: restart the shared connection
+Exit: 124 timed out (killed on Euler too), 75 no free slot after 10 minutes, 78 no 'Host euler-agents' in
+~/.ssh/config, 255 ssh failed."
+
+host=euler-agents
+slots=6
+maxt=900
+wait=600
+block="Host $host
+    HostName euler.ethz.ch
+    User <eth-username>
+    ControlMaster auto
+    ControlPath ~/.ssh/cm-%C
+    ControlPersist 8h
+    ServerAliveInterval 60
+    ServerAliveCountMax 3"
+
+die() {
+	echo "euler-ssh: $2" >&2
+	exit "$1"
+}
+
+case ${1:-} in -h | --help)
+	echo "$usage"
+	echo
+	echo "$block"
+	exit 0
+	;;
+esac
+if [ "$(ssh -G "$host" 2>/dev/null | awk '$1 == "hostname" { print $2 }')" = "$host" ]; then
+	die 78 "no 'Host $host' in ~/.ssh/config; add it, with your ETH username:
+$block"
+fi
+
+# Slot locks: lock directories holding the caller's pid, in a private directory of ours
+dir=${TMPDIR:-/tmp}
+dir=${dir%/}/euler-ssh-$(id -u)
+mkdir -m 700 "$dir" 2>/dev/null
+if [ -L "$dir" ] || [ ! -d "$dir" ] || [ ! -O "$dir" ] || ! chmod 700 "$dir"; then
+	die 2 "$dir is not a private directory of yours; remove it"
+fi
+held() {
+	local p
+	p=$(cat "$1/pid" 2>/dev/null) && kill -0 "$p" 2>/dev/null
+}
+lock=
+release() { if [ -n "$lock" ]; then rm -rf "$lock"; fi; }
+trap release EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+acquire() {
+	local i d
+	for ((i = 1; i <= slots; i++)); do
+		d=$dir/slot$i
+		if mkdir "$d" 2>/dev/null; then
+			echo $$ >"$d/pid.$$" && mv "$d/pid.$$" "$d/pid"
+			lock=$d
+			return 0
+		fi
+		# A holder killed with -9 leaves its directory: free it once its pid is gone
+		if [ -f "$d/pid" ]; then
+			held "$d" || rm -rf "$d"
+		elif [ -n "$(find "$d" -maxdepth 0 -mmin +1 2>/dev/null)" ]; then
+			rm -rf "$d"
+		fi
+	done
+	return 1
+}
+
+reconnect() {
+	local busy=0 d sock ans
+	for d in "$dir"/slot*; do
+		if [ -d "$d" ] && held "$d"; then busy=$((busy + 1)); fi
+	done
+	if [ "$busy" -gt 0 ] && [ "${1:-}" != --force ]; then
+		echo "euler-ssh: $busy call(s) are running on Euler; restarting the connection makes them fail." >&2
+		[ -t 0 ] || die 1 "wait for them, or rerun with --force"
+		printf 'Restart anyway? [y/N] ' >&2
+		read -r ans
+		case $ans in [yY]*) ;; *) die 1 "not restarted" ;; esac
+	fi
+	ssh -O exit "$host" 2>/dev/null
+	sock=$(ssh -G "$host" | awk '$1 == "controlpath" { print $2 }')
+	case $sock in "" | none) die 1 "'Host $host' has no ControlPath; add the one shown in euler-ssh --help" ;; esac
+	rm -f "$sock"
+	ssh -fNT "$host" && ssh -O check "$host"
+}
+
+t=120
+case ${1:-} in
+--reconnect)
+	shift
+	reconnect "${1:-}"
+	exit
+	;;
+esac
+
+rsync=
+args=" $* "
+if [[ $args == *" $host "* ]]; then
+	# Called as ssh by rsync -e: [ssh options...] euler-agents rsync --server ...
+	while [ $# -gt 0 ] && [ "$1" != "$host" ]; do shift; done
+	shift
+	[[ ${1:-} == *rsync ]] || die 2 "after '$host' only rsync is supported; run commands as euler-ssh 'command'"
+	rsync=1
+	t=$maxt
+fi
+if [ -z "$rsync" ] && [ "${1:-}" = -t ]; then
+	[ $# -ge 2 ] && [ "$2" -gt 0 ] 2>/dev/null || die 2 "-t takes a number of seconds"
+	t=$2
+	shift 2
+fi
+[ "$t" -le "$maxt" ] || die 2 "-t $t: at most $maxt s; run longer work as a Slurm job"
+if [ -z "$rsync" ] && [ "${1:-}" = --run ]; then
+	[ $# -ge 2 ] && [ -r "$2" ] || die 2 "--run takes a readable script"
+	script=$2
+	shift 2
+	interp=$(head -n 1 "$script")
+	case $interp in "#!"*) interp=${interp##*[/ ]} ;; *) die 2 "$script has no #! line" ;; esac
+	case $interp in python*) cmd="$interp -" ;; *) cmd="$interp -s --" ;; esac
+	[ $# -gt 0 ] && cmd="$cmd$(printf ' %q' "$@")"
+	exec <"$script"
+	set -- "$cmd"
+fi
+[ $# -gt 0 ] || die 2 "no command; see euler-ssh --help"
+
+if [ -n "$rsync" ]; then
+	remote="timeout -k 10 $t $*"
+else
+	cmd="$*"
+	# The caller's session, so that sbatch stores it with the job and euler-jobs --mine finds it
+	[ -n "${CLAUDE_CODE_SESSION_ID:-}" ] && cmd="export CLAUDE_CODE_SESSION_ID=$(printf %q "$CLAUDE_CODE_SESSION_ID"); $cmd"
+	remote="timeout -k 10 $t bash -c $(printf %q "$cmd")"
+fi
+
+start=$SECONDS
+until acquire; do
+	[ $((SECONDS - start)) -lt "$wait" ] || die 75 "no free slot after ${wait} s: $slots calls are running ($dir)"
+	sleep 1
+done
+err=$(mktemp "$dir/err.XXXXXX") || die 2 "can't write to $dir"
+while :; do
+	ssh -o BatchMode=yes -o ConnectTimeout=20 "$host" "$remote" 2>"$err"
+	rc=$?
+	# A refused session hasn't run anything or read stdin yet, so it is safe to retry
+	if [ "$rc" -eq 255 ] && grep -q "Session open refused" "$err" && [ $((SECONDS - start)) -lt "$wait" ]; then
+		sleep 5
+		continue
+	fi
+	break
+done
+cat "$err" >&2
+rm -f "$err"
+if [ "$rc" -eq 124 ]; then
+	echo "euler-ssh: timed out after $t s, and was killed on Euler too; run longer work as a Slurm job" >&2
+elif [ "$rc" -eq 255 ] && ! ssh -O check "$host" 2>/dev/null; then
+	echo "euler-ssh: no connection to Euler; ask the user to run 'euler-ssh --reconnect' in a terminal" \
+		"(password and MFA, if Euler asks)" >&2
+fi
+exit "$rc"

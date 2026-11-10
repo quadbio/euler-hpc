@@ -15,8 +15,9 @@ storage to pick, and the user's `Data transfer:` setup; if it is missing, read
 `${CLAUDE_PLUGIN_ROOT}/hooks/session_context.md`. Docs paths below are relative to https://docs.hpc.ethz.ch; read
 the page when you need more than the summary here.
 
-- `rsync` to or from `euler.ethz.ch` (login nodes); tar many small files first. `rclone` for Polybox on login
-  nodes (`/connections/polybox/`); ask support before terabytes.
+- `rsync` to or from `euler.ethz.ch` (login nodes); tar many small files first. From a session off Euler:
+  `rsync -a -e euler-ssh <local>/ euler-agents:<path>/` and back, at most 900 s per call (`euler-hpc:connect`).
+  `rclone` for Polybox on login nodes (`/connections/polybox/`); ask support before terabytes.
 - Globus for large transfers (`/services/globus/`), from the shell with `globus-cli` (`uv tool install
   globus-cli`; on a compute node, `module load eth_proxy` first):
   - Euler's collections are `ETH Zurich#Euler Project`, `ETH Zurich#Euler Work` and `ETH Zurich#Euler Scratch`;
@@ -30,5 +31,7 @@ the page when you need more than the summary here.
   - `globus transfer --batch` takes one source and destination pair per line; `--dry-run` prints the task
     without submitting it. The docs recommend keeping checksum verification, encrypting up to a few TB, and
     failing on quota errors when uploading.
+- Work is Lustre, project is NFS, and both cap the number of files per group (`/hardware/storage/`): pack many
+  small files, and search work with `lfs find` rather than `find`.
 - A directory named `nobackup` is left out of backups. Don't process data in batch jobs directly from external
   storage. (`/hardware/storage/`)

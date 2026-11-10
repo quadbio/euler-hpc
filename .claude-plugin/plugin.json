@@ -1,7 +1,7 @@
 {
   "name": "euler-hpc",
-  "version": "0.10.0",
-  "description": "Run coding agents efficiently on ETH Zurich's Euler cluster: the session's node, allocation, storage rules and your own setup at session start; skills for Slurm jobs and software, and for moving data; `euler-jobs`, an overview of your sessions with their jobs and PRs for you and your agents; `euler-step`, which runs a command in an allocation you hold; `euler-resume`, which reopens the sessions still open when your last job ended; and `euler-caps`, your per-user caps next to what your jobs use.",
+  "version": "0.11.0",
+  "description": "Run coding agents efficiently on ETH Zurich's Euler cluster, from a session on Euler or on your own machine: the session's node, allocation, storage rules and your own setup at session start; skills for Slurm jobs and software, for moving data, and for reaching Euler from another machine; `euler-jobs`, an overview of your sessions with their jobs and PRs for you and your agents; `euler-step`, which runs a command in an allocation you hold; `euler-resume`, which reopens the sessions still open when your last job ended; `euler-caps`, your per-user caps next to what your jobs use; and `euler-ssh`, commands and files for Euler from another machine.",
   "author": {
     "name": "quadbio"
   },

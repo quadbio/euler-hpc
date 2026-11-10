@@ -1,5 +1,5 @@
 {
-  "description": "On Euler only: this session's node and allocation, and the always-on cluster rules.",
+  "description": "On Euler: this session's node and allocation, and the always-on cluster rules. Elsewhere, with the euler-agents ssh entry: how to reach Euler.",
   "hooks": {
     "SessionStart": [
       {
