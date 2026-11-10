@@ -125,9 +125,14 @@ if [ -z "$rsync" ] && [ "${1:-}" = --run ]; then
 	[ $# -ge 2 ] && [ -r "$2" ] || die 2 "--run takes a readable script"
 	script=$2
 	shift 2
-	interp=$(head -n 1 "$script")
-	case $interp in "#!"*) interp=${interp##*[/ ]} ;; *) die 2 "$script has no #! line" ;; esac
-	case $interp in python*) cmd="$interp -" ;; *) cmd="$interp -s --" ;; esac
+	line=$(head -n 1 "$script")
+	case $line in "#!"*) ;; *) die 2 "$script has no #! line" ;; esac
+	# The interpreter by name, as Euler's PATH has it, with its options: #!/usr/bin/env [-S] python3 -u → python3 -u
+	read -r -a sb <<<"${line#\#!}"
+	[ "${sb[0]##*/}" = env ] && sb=("${sb[@]:1}")
+	[ "${sb[0]:-}" = -S ] && sb=("${sb[@]:1}")
+	sb[0]=${sb[0]##*/}
+	case ${sb[0]} in python*) cmd="${sb[*]} -" ;; *) cmd="${sb[*]} -s --" ;; esac
 	[ $# -gt 0 ] && cmd="$cmd$(printf ' %q' "$@")"
 	exec <"$script"
 	set -- "$cmd"
