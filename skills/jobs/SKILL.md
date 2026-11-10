@@ -51,9 +51,7 @@ Start from `assets/euler_job.sh`. Euler-specific Slurm rules:
   doesn't source `~/.bashrc`. If the manager isn't on `PATH` where you submit, or you pass `--export=NONE`, use its
   absolute path (`command -v pixi`).
 - **In-job internet:** add `module load eth_proxy` only if the job downloads or talks to an online service.
-  Python `aiohttp` ignores the proxy unless its session is created with `trust_env=True`. W&B can't log online
-  even then (`eth_proxy` puts `api.wandb.ai` in `no_proxy`): set `WANDB_MODE=offline` and `wandb sync` from a
-  login node afterwards.
+  Python `aiohttp` ignores the proxy unless its session is created with `trust_env=True`.
 - **Heavy many-small-file I/O:** stage to node-local **`$TMPDIR`** (request size with `--tmp=<size>`), compute
   there, copy results back — don't hammer shared storage.
 

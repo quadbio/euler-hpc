@@ -26,8 +26,7 @@ for a in "$@"; do
 	esac
 done
 if ! command -v sacctmgr >/dev/null; then
-	echo "euler-caps: no Slurm on $(hostname); run it on Euler, or pipe it there:" \
-		"ssh <euler host> 'bash -s' < \"\$(command -v euler-caps)\"" >&2
+	echo "euler-caps: no Slurm on $(hostname); run it on Euler" >&2
 	exit 1
 fi
 fail() {
